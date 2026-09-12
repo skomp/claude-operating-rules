@@ -1,0 +1,10 @@
+{
+  "name": "agent-operations",
+  "version": "0.1.0",
+  "description": "Coordinate parallel agents over one repository, write plans they can execute, and recover a session that outgrew resume.",
+  "author": { "name": "skomp", "url": "https://github.com/skomp" },
+  "homepage": "https://github.com/skomp/claude-operating-rules",
+  "repository": "https://github.com/skomp/claude-operating-rules",
+  "license": "MIT",
+  "keywords": ["subagents", "worktrees", "parallel", "planning", "dispatch"]
+}
