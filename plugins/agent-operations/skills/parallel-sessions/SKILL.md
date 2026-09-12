@@ -62,12 +62,33 @@ So make it mechanical, immediately before **every** `Agent` call that gets a wor
 not once per session:
 
 ```sh
-git rev-list --left-right --count origin/main...main   # MUST be 0 <tab> 0
+git fetch -q origin
+git symbolic-ref -q refs/remotes/origin/HEAD >/dev/null || git remote set-head origin --auto
+base=$(git symbolic-ref --short refs/remotes/origin/HEAD) &&   # e.g. origin/main
+  git rev-list --left-right --count "$base...${base#origin/}" # the RIGHT number MUST be 0
 ```
 
-Non-zero on the right means push before dispatching. Dispatching two agents in one
-message counts as two dispatches from one base — check once, but check *then*, after
-any merge you just did.
+The `fetch` is the part that does the work. Without it the command reads a local
+`origin/…` ref that may be days old, prints `0 0`, and clears a base that is stale —
+a probe that cannot report the condition it exists to catch. Deriving `base` rather
+than hardcoding `main` keeps it working in a repository whose default branch is not
+`main`.
+
+`refs/remotes/origin/HEAD` is written by `git clone`, so it can be absent in a
+repository created another way; the `set-head --auto` line repairs it in place. If that
+fails with `Cannot determine remote HEAD`, the remote itself reports no default — name
+the branch once by hand: `git remote set-head origin <branch>`.
+
+**Only the right-hand number blocks the dispatch.** Non-zero on the right is local
+commits that are not pushed: push before dispatching. Non-zero on the left is commits on
+the remote that are not pulled — a different situation with a different remedy. The
+agent's worktree branches from `origin/<default>` and gets those commits; the local
+checkout does not, so the sha and the test count quoted in the dispatch describe a
+different tree from the one the agent will see. Pull, re-run the check, then quote the
+numbers.
+
+Dispatching two agents in one message counts as two dispatches from one base — check
+once, but check *then*, after any merge you just did.
 
 And in the dispatch itself, **state the base commit and the expected test count
 together**: "branched from `origin/main` at `<sha>`, where `N` tests pass". Those two
