@@ -1,0 +1,10 @@
+{
+  "name": "evidence-discipline",
+  "version": "0.1.0",
+  "description": "Prove the check can fail before trusting that it passed, and finish a correction everywhere the claim appears.",
+  "author": { "name": "skomp", "url": "https://github.com/skomp" },
+  "homepage": "https://github.com/skomp/claude-operating-rules",
+  "repository": "https://github.com/skomp/claude-operating-rules",
+  "license": "MIT",
+  "keywords": ["verification", "debugging", "evidence", "false-negative", "review"]
+}
