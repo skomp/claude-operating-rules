@@ -25,6 +25,20 @@ An implementer transcribes plan code faithfully, because it arrived as requireme
 - **Never build a numeric test from exact binary fractions.** A float32 round-trip check written with 0.5, 0.25 and 0.75 passes before and after the fix. Use 0.74.
 - **Keep this clause in every fix dispatch:** *"if you conclude one of these findings is wrong, say so with evidence rather than implementing something you believe is incorrect."*
 
+### "Real code, not placeholders" does not mean code as requirements
+
+`superpowers:writing-plans` fires at the same moment and looks opposed. It forbids **placeholders** — `// TODO: implement the parser here` defers every real decision. This skill forbids **passing untested code off as requirements**. One plan satisfies both.
+
+What a plan task can carry, best to worst:
+
+1. **A contract** — exact names, signatures, types, and the failure the code must prevent. A wrong signature is caught in seconds.
+2. **A measurement** — return shapes, real enumerated output, whether the thing compiles. What the implementer cannot cheaply re-derive.
+3. **Code labelled a proposal**, with *"be sceptical, report defects rather than fixing silently"* in the dispatch.
+4. **Code presented as requirements.** This is what produced the fourteen defects above.
+5. **A placeholder.** Worse than all of these, and what `superpowers:writing-plans` warns you off.
+
+So "real code, not placeholders" means do not write 1 and 2 as stubs. It does not mean write 4.
+
 ## Rule 2 — Check what an agent is ALLOWED to write before you scope work to it
 
 An agent-seat plugin repo, issue 196, 2026-09-02. Two full dispatches to the autonomous agent seat burned, both stuck, both for the same reason: four of the seven files the issue required live under `constructs/quest/`, which is hard read-only for that seat in every mode. Refusals there are **format-budget** failures, so each run spent its entire budget refusing itself and escalated having written only the files it was allowed to touch.
