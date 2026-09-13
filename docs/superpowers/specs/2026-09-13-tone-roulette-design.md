@@ -65,22 +65,8 @@ plugins/tone-roulette/
 ├── .claude-plugin/plugin.json        # "outputStyles": "./output-styles/"
 ├── hooks/hooks.json                  # SessionStart, matcher: startup|resume|clear|compact
 ├── hooks-handlers/session-start.sh   # roll, persist, announce, inject
-├── output-styles/
-│   ├── noir-detective.md
-│   ├── drill-sergeant.md
-│   ├── golden-retriever.md
-│   ├── victorian-naturalist.md
-│   ├── corporate-bureaucrat.md
-│   ├── sports-commentator.md
-│   ├── conspiracy-theorist.md
-│   ├── medieval-herald.md
-│   ├── pirate.md
-│   ├── victorian-explorer.md
-│   ├── telemarketer.md
-│   ├── korinthenkacker.md
-│   ├── chain-smoking-defender.md
-│   ├── laconic.md
-│   └── twenty-questions.md
+├── output-styles/                    # 19 tone files, one per tone — the directory itself
+│                                      #   is the catalogue; this tree does not enumerate them
 └── skills/tone/SKILL.md              # /tone, /tone <name>, /tone off, /tone list
 ```
 
