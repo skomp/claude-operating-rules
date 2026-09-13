@@ -1,0 +1,11 @@
+{
+  "name": "tone-roulette",
+  "version": "0.1.0",
+  "description": "Rolls a random conversational tone at session start and holds it for the session.",
+  "author": { "name": "skomp", "url": "https://github.com/skomp" },
+  "homepage": "https://github.com/skomp/claude-operating-rules",
+  "repository": "https://github.com/skomp/claude-operating-rules",
+  "license": "MIT",
+  "keywords": ["output-style", "tone", "session-start", "fun"],
+  "outputStyles": "./output-styles/"
+}

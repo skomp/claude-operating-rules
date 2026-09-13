@@ -1,0 +1,16 @@
+{
+  "description": "Rolls a random conversational tone on a fresh session (startup, clear or compact), holds it for the session, and injects it as additional context.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-start.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
