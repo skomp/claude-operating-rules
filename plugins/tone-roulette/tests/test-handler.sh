@@ -250,7 +250,7 @@ days_ago_ts() {
 # =====================================================================
 # Test 5 — randomness is real: 60 fresh rolls, at least 3 distinct tones.
 #
-# Chosen so a correct implementation (uniform pick among 8 tones) fails
+# Chosen so a correct implementation (uniform pick among 17 tones) fails
 # this bar with probability far below any flakiness budget, while a
 # fixed-pick implementation always returns exactly 1 distinct tone and
 # always fails it.

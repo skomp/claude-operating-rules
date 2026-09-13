@@ -139,7 +139,7 @@ description: World-weary 1940s private eye narrating your codebase
 
 The ground-rules block enforces requirement 7 and must appear in every file, because a file
 selected natively through `/output-style` is never seen by the script and so cannot have the
-rules prepended to it. That means thirteen copies of the same paragraph, which is a drift
+rules prepended to it. That means seventeen copies of the same paragraph, which is a drift
 hazard. It is accepted deliberately and guarded by a test asserting that every tone file
 contains the block byte-for-byte.
 
@@ -171,7 +171,7 @@ Every failure path exits 0. A hook belonging to a fun plugin must never degrade 
 
 ## Verification
 
-- `claude plugin details tone-roulette` reports 13 output styles, 1 hook and 1 skill.
+- `claude plugin details tone-roulette` reports 17 output styles, 1 hook and 1 skill.
 - The handler script, run directly with crafted stdin JSON, emits valid JSON for each
   matcher value — asserted with `jq`, not by eye.
 - Rolling repeatedly across many runs yields more than one distinct tone. This proves the
@@ -180,7 +180,7 @@ Every failure path exits 0. A hook belonging to a fun plugin must never degrade 
   state file holds.
 - Every tone file contains the ground-rules block byte-for-byte.
 - Live check, needs a human: enable the plugin, start a session, confirm the announcement
-  appears and the tone holds, and confirm `/output-style` lists all thirteen.
+  appears and the tone holds, and confirm `/output-style` lists all seventeen.
 
 ## Known limitations
 
@@ -204,6 +204,13 @@ Every failure path exits 0. A hook belonging to a fun plugin must never degrade 
   lands reliably; on Haiku it frequently does not, even though the hook still fires and a
   tone is still rolled and written to the state file — the mechanism works, the model just
   doesn't follow the injected instruction. Other models have not been tested.
+- **Four tones perform doubt or pessimism** (`negative-nancy`, `hedging-hannah`,
+  `second-guess-sid`, `nervous-nellie`), and their hedging is a speech register, not a
+  confidence signal — the underlying assessment is unchanged, and each file's `## Voice`
+  section says so explicitly. A reader who does not know this can mistake the performance
+  for the substance: "I think the tests maybe passed?" reads as uncertainty about the test
+  result, when the result itself was never in doubt. Anyone who needs the assistant's actual
+  confidence should ask directly or switch tones with `/tone <name>`.
 
 ## Out of scope
 
