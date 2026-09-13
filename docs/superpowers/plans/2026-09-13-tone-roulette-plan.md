@@ -17,6 +17,15 @@ this plan argues from it)
 > (`docs/superpowers/specs/2026-09-13-tone-roulette-design.md`) and in the shipped
 > `hooks/hooks.json`, not here.
 
+> **Superseded since this plan was written:** the two references below to the standalone
+> `/output-style` command — "the other way to switch" in the `/tone` skill task, and
+> "confirming... `/output-style` lists all eight" in Verification — describe a command that
+> was deprecated in Claude Code v2.1.73 and removed in v2.1.91. Choosing or listing a style
+> now lives in `/config` → Output style. This plan's text is left as originally written
+> below — it is a historical record of what was true when the plan was drafted, not a live
+> instruction — and the correction lives in the spec
+> (`docs/superpowers/specs/2026-09-13-tone-roulette-design.md`, Known limitations).
+
 ## Global constraints
 
 1. **No tone text exists in two places.** Each tone lives in exactly one file under
