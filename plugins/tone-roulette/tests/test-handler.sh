@@ -334,26 +334,32 @@ state_file_for() {
 }
 
 # =====================================================================
-# Test 10 — a tone file with `"`, `\` and a literal newline round-trips:
-# emitted JSON parses and .additionalContext reproduces the body exactly.
+# Test 10 — a tone file with `"`, `\`, a literal newline, a literal TAB
+# and another C0 control character round-trips: emitted JSON parses and
+# .additionalContext reproduces the body exactly.
 #
 # The fixture is built here, in the test's own temp directory — no joke
-# tone file is added to the shipped catalogue.
+# tone file is added to the shipped catalogue. Built with printf (not a
+# quoted heredoc) so the tab (\t) and unit-separator (\x1f) control bytes
+# actually land in the file as real bytes, not as their two-character
+# spellings.
 # =====================================================================
 {
   fixture_root="$(new_tmp_dir)"
   mkdir -p "$fixture_root/output-styles"
   fixture_file="$fixture_root/output-styles/fixture-tone.md"
 
-  cat > "$fixture_file" <<'EOF'
----
-name: fixture-tone
-description: Round-trip escaping fixture for test-handler.sh.
----
-
-He said "hello" and meant it, then typed C:\path\to\file without flinching.
-A lone backslash \ and a "quoted phrase" share this second line on purpose.
-EOF
+  {
+    printf -- '---\n'
+    printf -- 'name: fixture-tone\n'
+    printf -- 'description: Round-trip escaping fixture for test-handler.sh.\n'
+    printf -- '---\n'
+    printf -- '\n'
+    printf -- 'He said "hello" and meant it, then typed C:\\path\\to\\file without flinching.\n'
+    printf -- 'A lone backslash \\ and a "quoted phrase" share this second line on purpose.\n'
+    printf -- 'Column1\tColumn2\tColumn3 has a literal TAB between fields.\n'
+    printf -- 'A unit-separator control character sits right here: \x1f — and then text.\n'
+  } > "$fixture_file"
 
   # Expected body: same frontmatter-stripping rule the handler documents
   # (strip the two `---` lines and everything between them), applied here

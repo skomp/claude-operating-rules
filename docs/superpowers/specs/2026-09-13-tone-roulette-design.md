@@ -165,8 +165,12 @@ Every failure path exits 0. A hook belonging to a fun plugin must never degrade 
 - **Disabling the plugin mid-session does not retract the tone.** Text already injected is
   in the conversation history. `/tone off` is the mid-session path; disabling the plugin is
   the between-sessions path.
-- **Only the `startup` matcher rolls.** A session resumed with `--resume` re-injects the
-  stored tone instead of rolling a new one.
+- **Only `startup` rolls.** `resume`, `clear` and `compact` all re-inject the stored tone
+  from the state file without re-rolling. `fork` is deliberately excluded from the matcher:
+  if a fork gets a new `session_id` the handler would find no state file and roll a second,
+  different tone with its own announcement; if a fork shares the parent's `session_id` the
+  resume path would re-emit the same `additionalContext` into a context that already
+  contains it. Both outcomes are wrong, so `fork` never fires the hook.
 
 ## Out of scope
 
