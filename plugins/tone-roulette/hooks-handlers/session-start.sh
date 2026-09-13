@@ -26,7 +26,7 @@ set -u
 
 main() {
   local script_dir styles_dir state_dir input session_id source_val state_file
-  local tones=() f base existing selected count idx off_token is_off
+  local tones=() f base existing selected count idx off_token is_off rolled
   local tone_file body escaped_body sys_message escaped_sys_message
 
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,6 +60,17 @@ main() {
   #     field, per Global Constraint 3 and the brief's Step 0 fallback. ---
   session_id="$(printf '%s' "$input" 2>/dev/null | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed -E 's/^"session_id"[[:space:]]*:[[:space:]]*"(.*)"$/\1/')"
 
+  # --- Sanitise session_id with the same rule the $PWD fallback below
+  #     already uses. session_id is expected to be a UUID from Claude Code,
+  #     not attacker input, but nothing about composing it directly into
+  #     "$state_dir/$session_id" stopped a value like "../../escaped" from
+  #     writing outside the state directory. Applying the identical `tr`
+  #     here means both the stdin-supplied id and the $PWD fallback share
+  #     one hygiene rule instead of only one of them being safe. A missing
+  #     or empty session_id sanitises to itself (empty), so the fallback
+  #     checks below are unaffected. ---
+  session_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9_.-' '_')"
+
   # --- Extract source the same way: it names the matcher value
   #     (startup|resume|clear|compact|fork), and decides whether a leftover
   #     "off" state is honored (everything but startup) or ignored
@@ -78,7 +89,7 @@ main() {
 
   # --- State directory. Create if absent; if we can't, we simply can't
   #     persist a resume — still roll and announce below. ---
-  state_dir="${HOME}/.claude/tone-roulette"
+  state_dir="${HOME:-}/.claude/tone-roulette"
   mkdir -p "$state_dir" 2>/dev/null
   state_file=""
   if [ -d "$state_dir" ]; then
@@ -122,10 +133,15 @@ main() {
   fi
 
   # --- Roll path: source=startup, or no usable state, or the recorded tone
-  #     is stale. ---
+  #     is stale. `rolled` records whether this run actually rolled a new
+  #     tone (true here) or is re-announcing one already in force (false,
+  #     set when `selected` came from the resume path above) — the
+  #     announcement below says "rolled" only when it's true. ---
+  rolled=0
   if [ -z "$selected" ]; then
     idx=$((RANDOM % count))
     selected="${tones[$idx]}"
+    rolled=1
     if [ -n "$state_file" ]; then
       { printf '%s\n' "$selected" > "$state_file"; } 2>/dev/null
     fi
@@ -209,7 +225,17 @@ main() {
   )"
   escaped_body="${escaped_body%X}"
 
-  sys_message="🎲 Tone rolled: ${selected}"
+  # --- Announcement: only claim "rolled" when a roll actually happened
+  #     this run. A resumed tone (clear/compact/resume with valid state)
+  #     did not just get rolled, and saying so was a lie the user had no
+  #     way to catch — say "held" instead. The message is never dropped:
+  #     after a /clear the user may genuinely not remember which tone is
+  #     active, and silence would be worse than a plain restatement. ---
+  if [ "$rolled" -eq 1 ]; then
+    sys_message="🎲 Tone rolled: ${selected}"
+  else
+    sys_message="🎲 Tone held: ${selected}"
+  fi
   escaped_sys_message="$(printf '%s' "$sys_message" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
 
   printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}' \

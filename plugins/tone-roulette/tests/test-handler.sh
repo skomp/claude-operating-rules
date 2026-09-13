@@ -107,6 +107,45 @@ state_file_for() {
   fi
 
   TEST1_OUT="$out"
+
+  # M6 — the tone named in .systemMessage and the tone whose body is in
+  # .additionalContext must be the same tone. Determined independently of
+  # the handler: sys_tone is whichever catalog tone name is a substring of
+  # systemMessage; body_tone is whichever catalog tone's own
+  # frontmatter-stripped body (computed here with a plain awk one-liner,
+  # not the handler's logic) exactly equals additionalContext.
+  sysmsg_for_pairing="$(printf '%s' "$out" | jq -r '.systemMessage // empty')"
+  ctx_for_pairing="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty')"
+
+  sys_tone=""
+  for t in "${TONES[@]}"; do
+    case "$sysmsg_for_pairing" in
+      *"$t"*) sys_tone="$t" ;;
+    esac
+  done
+
+  body_tone=""
+  for t in "${TONES[@]}"; do
+    candidate_body="$(
+      awk '
+        NR == 1 && $0 == "---" { infm = 1; next }
+        infm && $0 == "---"    { infm = 0; next }
+        infm                   { next }
+        { print }
+      ' "$STYLES_DIR/$t.md"
+    )"
+    if [ "$candidate_body" = "$ctx_for_pairing" ]; then
+      body_tone="$t"
+      break
+    fi
+  done
+
+  check
+  if [ -n "$sys_tone" ] && [ -n "$body_tone" ] && [ "$sys_tone" = "$body_tone" ]; then
+    pass "test1: systemMessage's tone ($sys_tone) matches additionalContext's tone ($body_tone)"
+  else
+    fail "test1: systemMessage names '$sys_tone' but additionalContext's body matches '$body_tone'"
+  fi
 }
 
 # =====================================================================
@@ -226,9 +265,11 @@ state_file_for() {
   printf '%s\n' "$known" > "$(state_file_for "$home" "$sid")"
 
   all_same=1
+  last_sysmsg=""
   for _i in $(seq 1 20); do
     out="$(run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$sid\",\"source\":\"resume\"}")"
     sysmsg="$(printf '%s' "$out" | jq -r '.systemMessage // empty')"
+    last_sysmsg="$sysmsg"
     case "$sysmsg" in
       *"$known"*) ;;
       *) all_same=0 ;;
@@ -249,6 +290,21 @@ state_file_for() {
   else
     fail "test6: state file was rewritten to '$final_state', expected unchanged '$known'"
   fi
+
+  # R8 — a resume did not just roll a tone, so systemMessage must not claim
+  # it did. It should say "held", not "rolled".
+  check
+  case "$last_sysmsg" in
+    *rolled*)
+      fail "test6: resume's systemMessage ('$last_sysmsg') says 'rolled', but nothing was rolled"
+      ;;
+    *held*)
+      pass "test6: resume's systemMessage ('$last_sysmsg') says 'held', not 'rolled'"
+      ;;
+    *)
+      fail "test6: resume's systemMessage ('$last_sysmsg') contains neither 'rolled' nor 'held'"
+      ;;
+  esac
 }
 
 # =====================================================================
@@ -467,6 +523,77 @@ state_file_for() {
     pass "test11: source=startup overwrote the __off__ state file with a real tone ($state_after)"
   else
     fail "test11: source=startup left the state file as '$state_after', expected a real tone != __off__"
+  fi
+}
+
+# =====================================================================
+# Test 12 — I4: HOME unset must not crash the handler. Under `set -u`, a
+# bare `"${HOME}"` reference aborts the whole script with an "unbound
+# variable" error and a non-zero exit the moment HOME isn't set — a
+# violation of "every failure path exits 0" (stated in this script's own
+# header and in the design spec). `env -u HOME` runs the handler with HOME
+# genuinely absent from its environment, not merely empty.
+# =====================================================================
+{
+  sid="$(next_session_id)"
+  out="$(printf '{"session_id":"%s","source":"startup"}' "$sid" \
+    | env -u HOME CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HANDLER" 2>/dev/null)"
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ]; then
+    pass "test12: HOME unset still exits 0"
+  else
+    fail "test12: HOME unset exited $ec, expected 0"
+  fi
+}
+
+# =====================================================================
+# Test 13 — M4: a path-traversal-shaped session_id must not escape the
+# state directory. The state file path is composed as
+# "$state_dir/$session_id" with no sanitisation before this fix, so a
+# session_id of "../../escaped" wrote outside ~/.claude/tone-roulette/.
+# session_id is expected to be a UUID from Claude Code, not attacker
+# input, but the fix applies the same `tr` the $PWD fallback already uses,
+# so this asserts the state file lands inside the state directory either
+# way.
+# =====================================================================
+{
+  home="$(new_tmp_dir)"
+  hostile_sid="../../escaped"
+  out="$(run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$hostile_sid\",\"source\":\"startup\"}")"
+  ec=$?
+
+  state_dir="$home/.claude/tone-roulette"
+  escaped_path="$home/escaped"
+
+  check
+  if [ "$ec" -eq 0 ] && [ ! -e "$escaped_path" ]; then
+    pass "test13: traversal-shaped session_id did not escape to $escaped_path"
+  else
+    fail "test13: traversal-shaped session_id produced $escaped_path (exit=$ec) — escaped the state directory"
+  fi
+
+  check
+  # Exactly one file should exist directly under the state directory (the
+  # sanitised name), and it must resolve inside state_dir, not above it.
+  # find, not a glob: the sanitised name starts with a literal '.'
+  # (".." with "/" replaced by "_"), and bash's default (non-dotglob) "*"
+  # silently skips dotfiles, which would make this check pass for the
+  # wrong reason (nothing matched) rather than actually verifying anything.
+  written_count=0
+  wrote_inside=0
+  while IFS= read -r f; do
+    [ -e "$f" ] || continue
+    written_count=$((written_count + 1))
+    case "$(cd "$(dirname "$f")" && pwd)" in
+      "$state_dir") wrote_inside=1 ;;
+    esac
+  done < <(find "$state_dir" -mindepth 1 -maxdepth 1 2>/dev/null)
+  if [ "$written_count" -ge 1 ] && [ "$wrote_inside" -eq 1 ]; then
+    pass "test13: the sanitised session_id's state file landed inside $state_dir"
+  else
+    fail "test13: expected a state file inside $state_dir, found $written_count candidate(s), inside=$wrote_inside"
   fi
 }
 

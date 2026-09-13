@@ -5,6 +5,18 @@ this plan argues from it)
 **Branch:** `worktree-dialect-plugin`
 **Repo:** `skomp/claude-operating-rules`
 
+> **Superseded during implementation — controller ruling R3:** every matcher value below
+> written as `startup|clear|compact` (lines 34, 46 and 133 as originally written) was
+> corrected to `startup|resume|clear|compact`. Task 2's Step 0 probe found that the binary's
+> `matcherMetadata` for `SessionStart` lists `source` values `startup`, `resume`, `clear`,
+> `compact`, `fork` — a fifth value, `resume`, that this plan did not anticipate. R3 added
+> `resume` to the shipped `hooks.json` so the spec's documented resume behaviour (re-inject
+> the stored tone) is enforced by the hook actually firing, rather than depending on
+> unverified session-history replay; `fork` stays excluded. This plan is left as originally
+> written below — the correction lives in the spec
+> (`docs/superpowers/specs/2026-09-13-tone-roulette-design.md`) and in the shipped
+> `hooks/hooks.json`, not here.
+
 ## Global constraints
 
 1. **No tone text exists in two places.** Each tone lives in exactly one file under
