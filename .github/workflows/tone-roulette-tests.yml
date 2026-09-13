@@ -1,0 +1,15 @@
+name: tone-roulette tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    # test-handler.sh needs bash 4+ (mapfile, associative arrays); ubuntu-latest
+    # ships bash 5 and jq preinstalled.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash plugins/tone-roulette/tests/test-handler.sh
+      - run: bash plugins/tone-roulette/tests/test-tone-files.sh

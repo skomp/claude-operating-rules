@@ -13,6 +13,11 @@
 #
 # No dependency on `shuf`. May use `jq`, but does not need to for this file
 # format (YAML frontmatter, not JSON).
+#
+# Unlike its sibling test-handler.sh, this file has no bash 4 dependency
+# (no `mapfile`, no `declare -A`) and has been verified to run cleanly
+# under bash 3.2, the version macOS ships at /bin/bash (issue #7 item 2).
+# The handler is likewise clean under 3.2 — see test-handler.sh's header.
 
 set -u
 
@@ -35,7 +40,8 @@ check() {
   check_count=$((check_count + 1))
 }
 
-# The ground-rules block, byte-for-byte, as specified by the task-1 brief.
+# The ground-rules block, byte-for-byte, as specified in
+# docs/superpowers/specs/2026-09-13-tone-roulette-design.md.
 # This is the ONE place this text is retyped; every file is compared
 # against this constant rather than against each other.
 EXPECTED_GROUND_RULES=$(cat <<'BLOCK'
