@@ -41,12 +41,28 @@ that would record the wrapper's real shape has not run.
 /plugin install tone-roulette
 ```
 
-## Two rules to put in your own CLAUDE.md
+## tone-roulette: known limitations
+
+- **Subagents do not inherit the tone.** Forks inherit the parent's system prompt; other
+  subagents run their own. Implementer and reviewer agents answer in the default voice.
+- **Disabling the plugin mid-session does not retract a tone already injected.** The text
+  is already in the conversation history. `/tone off` is the mid-session path; disabling
+  the plugin is the between-sessions path.
+- **Only `startup` rolls.** A resumed session re-injects the stored tone rather than
+  rolling a new one, so `--resume` keeps whatever tone was already in play.
+- **Tone adherence depends on the model.** Tested on Haiku and Sonnet: on Sonnet the tone
+  lands reliably. On Haiku it frequently does not — the hook still fires, a tone is still
+  rolled and written to the state file, but the model answers in the plain default voice
+  anyway. The mechanism is working in that case; the model is not following the injected
+  instruction. A Haiku user who sees no tone is looking at a model limitation, not a broken
+  plugin. Other models have not been tested.
+
+## Three rules to put in your own CLAUDE.md
 
 Each skill's frontmatter `description` is its trigger — that is the mechanism that fires
 it, and it needs no help from you.
 
-But a description only *routes*; it is not itself an instruction that gets obeyed. Two
+But a description only *routes*; it is not itself an instruction that gets obeyed. Three
 rules here have to hold even when the skill is never opened, because the cost of missing
 them lands outside your session. Paste these into your `CLAUDE.md`:
 
@@ -54,9 +70,12 @@ them lands outside your session. Paste these into your `CLAUDE.md`:
 - Never `git add -A` or `git commit -a` while an agent of yours is live in the same
   checkout. Stage explicit paths you own.
 - Every GitHub issue you create carries the `created-by-claude` label.
+- Never agree a coordination convention with another session — a freeze, a handoff word,
+  an ownership map. Send facts about your own state; ask me for anything more.
 ```
 
-The second only applies if you install `ticket-craft`.
+The second only applies if you install `ticket-craft`. The third is the one a session
+breaks before it would ever open a skill: it is already composing the message.
 
 ## On provenance
 
