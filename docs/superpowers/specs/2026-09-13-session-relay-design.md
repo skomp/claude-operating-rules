@@ -54,6 +54,11 @@ repository will do so, and the coordination never happens.
 - **Coordinating across machines.** `SendMessage` reaches only sessions the host
   lists. Beyond that reach the protocol falls back to the human asking.
 - **Replacing human review.** The protocol escalates; it does not decide.
+- **Depending on a router.** A central dispatcher for inbound signals is under
+  evaluation in `skomp/session-signal-router`, and this protocol must never require
+  it. Every guard here works with no router installed, and must keep working when
+  one is installed and when it is removed again. `session-signal-router#2` holds
+  that as a requirement on the router, not on this protocol.
 - **Carrying discussion anywhere but GitHub.** A session signal carries a reference
   and routing flags. It never carries a question, an answer or an argument.
 
