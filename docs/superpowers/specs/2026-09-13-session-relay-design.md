@@ -348,8 +348,11 @@ Field by field, because two of these were previously left to inference:
      and it is addressed to this delivery.
   3. A receiver with no signal reads the newest protocol comment's header. That is the
      recovery path.
-  4. A receiver seeing the two disagree **uses the signal, continues, and reports the
-     disagreement in its reply.** It is a defect of the sender. It is not a reason to
+  4. A receiver **compares the two before scheduling** — this is a step it performs,
+     not a condition that happens to fire. Measured on 2026-09-13: stating the rule as
+     a condition produced a session that never compared, because nothing told it to
+     look. Seeing them differ, it **uses the signal, continues, and reports the
+     disagreement in its reply, quoting both values.** It is a defect of the sender. It is not a reason to
      stop. Measured on 2026-09-13: a session that met this stopped and asked a human,
      which is right when the protocol is silent and wrong once it says what to do.
 - `seq` is this sender's comment count on this issue, starting at 1. The issue body
