@@ -25,8 +25,8 @@
 set -u
 
 main() {
-  local script_dir styles_dir state_dir input session_id state_file
-  local tones=() f base existing selected count idx
+  local script_dir styles_dir state_dir input session_id source_val state_file
+  local tones=() f base existing selected count idx off_token is_off
   local tone_file body escaped_body sys_message escaped_sys_message
 
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,6 +60,12 @@ main() {
   #     field, per Global Constraint 3 and the brief's Step 0 fallback. ---
   session_id="$(printf '%s' "$input" 2>/dev/null | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed -E 's/^"session_id"[[:space:]]*:[[:space:]]*"(.*)"$/\1/')"
 
+  # --- Extract source the same way: it names the matcher value
+  #     (startup|resume|clear|compact|fork), and decides whether a leftover
+  #     "off" state is honored (everything but startup) or ignored
+  #     (startup always rolls fresh — see the off-token handling below). ---
+  source_val="$(printf '%s' "$input" 2>/dev/null | grep -o '"source"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed -E 's/^"source"[[:space:]]*:[[:space:]]*"(.*)"$/\1/')"
+
   if [ -z "$session_id" ]; then
     # Fallback: key the state file on a sanitised $PWD instead.
     session_id="$(printf '%s' "$PWD" | tr -c 'A-Za-z0-9_.-' '_')"
@@ -79,11 +85,27 @@ main() {
     state_file="$state_dir/$session_id"
   fi
 
-  # --- Resume path: state file names a tone that still exists. ---
+  # --- Off token: the /tone skill's "off" switches the tone off by writing
+  #     this literal value to the state file rather than deleting it, so
+  #     absence keeps meaning "roll" and "off" gets its own representation
+  #     (a genuinely missing/unreadable/stale state file still rolls fresh,
+  #     unchanged from before). It can never collide with a real tone name:
+  #     tone names are catalogue basenames, and the catalogue is asserted to
+  #     hold exactly eight of those, none named this. ---
+  off_token="__off__"
+  is_off=0
+
+  # --- Resume path: only for a non-startup source (resume/clear/compact,
+  #     or anything unrecognized). A fresh session (source=startup) always
+  #     rolls below, regardless of what a previous session left in the
+  #     state file — including a leftover off_token, which must never leak
+  #     into a new session. ---
   selected=""
-  if [ -n "$state_file" ] && [ -f "$state_file" ]; then
+  if [ "$source_val" != "startup" ] && [ -n "$state_file" ] && [ -f "$state_file" ]; then
     existing="$(head -n 1 "$state_file" 2>/dev/null | tr -d '\r\n')"
-    if [ -n "$existing" ]; then
+    if [ "$existing" = "$off_token" ]; then
+      is_off=1
+    elif [ -n "$existing" ]; then
       for base in "${tones[@]}"; do
         if [ "$base" = "$existing" ]; then
           selected="$existing"
@@ -93,7 +115,14 @@ main() {
     fi
   fi
 
-  # --- Roll path: no usable state, or the recorded tone is stale. ---
+  # --- Off path: the session was explicitly switched off and this isn't a
+  #     fresh startup. Print nothing, exit 0 — the session stays untoned. ---
+  if [ "$is_off" -eq 1 ]; then
+    return 0
+  fi
+
+  # --- Roll path: source=startup, or no usable state, or the recorded tone
+  #     is stale. ---
   if [ -z "$selected" ]; then
     idx=$((RANDOM % count))
     selected="${tones[$idx]}"

@@ -405,6 +405,71 @@ state_file_for() {
   fi
 }
 
+# =====================================================================
+# Test 11 — the __off__ token (controller ruling R4): "off" is represented
+# explicitly in the state file, not by deleting it. Absence still means
+# "roll" (test 7 covers that); __off__ means "stay untoned", except on a
+# fresh startup, which always rolls and must never let a leftover __off__
+# leak into the new session.
+# =====================================================================
+{
+  for src in compact clear resume; do
+    home="$(new_tmp_dir)"
+    sid="$(next_session_id)"
+    mkdir -p "$(dirname "$(state_file_for "$home" "$sid")")"
+    printf '__off__\n' > "$(state_file_for "$home" "$sid")"
+
+    out="$(run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$sid\",\"source\":\"$src\"}")"
+    ec=$?
+    state_after="$(cat "$(state_file_for "$home" "$sid")" 2>/dev/null)"
+
+    check
+    if [ -z "$out" ] && [ "$ec" -eq 0 ]; then
+      pass "test11: source=$src with __off__ state produces no stdout and exit 0"
+    else
+      fail "test11: source=$src with __off__ state gave exit=$ec, out='$out' (expected empty output, exit 0)"
+    fi
+
+    check
+    if [ "$state_after" = "__off__" ]; then
+      pass "test11: source=$src leaves the __off__ state file untouched"
+    else
+      fail "test11: source=$src rewrote the state file to '$state_after', expected it to stay __off__"
+    fi
+  done
+
+  # source=startup must roll a real tone regardless of a leftover __off__,
+  # and must overwrite the state file with that tone (never leave __off__
+  # in place for a new session).
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+  mkdir -p "$(dirname "$(state_file_for "$home" "$sid")")"
+  printf '__off__\n' > "$(state_file_for "$home" "$sid")"
+
+  out="$(run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$sid\",\"source\":\"startup\"}")"
+  ec=$?
+  ctx="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty')"
+  state_after="$(cat "$(state_file_for "$home" "$sid")" 2>/dev/null)"
+
+  check
+  if [ "$ec" -eq 0 ] && printf '%s' "$out" | jq . >/dev/null 2>&1 && [ -n "$ctx" ]; then
+    pass "test11: source=startup with a leftover __off__ state still emits a valid, non-empty roll"
+  else
+    fail "test11: source=startup with a leftover __off__ state failed to roll (exit=$ec, out=$out)"
+  fi
+
+  check
+  is_real=0
+  for t in "${TONES[@]}"; do
+    [ "$t" = "$state_after" ] && is_real=1
+  done
+  if [ "$state_after" != "__off__" ] && [ "$is_real" -eq 1 ]; then
+    pass "test11: source=startup overwrote the __off__ state file with a real tone ($state_after)"
+  else
+    fail "test11: source=startup left the state file as '$state_after', expected a real tone != __off__"
+  fi
+}
+
 echo ""
 echo "Ran $check_count assertions."
 if [ "$fail_count" -gt 0 ]; then

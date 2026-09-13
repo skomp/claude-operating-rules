@@ -91,6 +91,11 @@ that could not be confirmed against a working example.
 - **`clear` / `compact`** — do not roll. Read the state file, re-emit the same tone's
   `additionalContext`. This is what satisfies requirement 4: compaction can drop the
   injected instruction, so it is re-injected unchanged rather than re-rolled.
+- **`resume` / `clear` / `compact` emit nothing when the state file holds `__off__`.** The
+  `/tone off` command writes this literal token instead of deleting the state file, so
+  absence keeps meaning "roll" and "off" gets its own explicit representation. `startup`
+  alone ignores a leftover `__off__` and always rolls a fresh tone — switching off is
+  per-session, and it must never leak into a new one.
 
 State lives at `~/.claude/tone-roulette/<session_id>`, a single line holding the tone name.
 `session_id` comes from the hook's stdin JSON. If the state file is missing when `clear` or
@@ -139,6 +144,7 @@ a bug.
 |---|---|
 | `output-styles/` missing or empty | Emit nothing, exit 0. The session proceeds untoned |
 | State file unreadable, or holds an unknown tone name | Roll fresh; do not fail |
+| State file holds the literal value `__off__` | On `resume`/`clear`/`compact`: emit nothing, exit 0, session stays untoned. On `startup`: ignore it and roll fresh, same as any other source |
 | `session_id` absent from stdin | Fall back to a single state file keyed by working directory |
 | Tone file missing its frontmatter `name` | Skip that file when building the catalogue |
 
