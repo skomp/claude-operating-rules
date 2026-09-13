@@ -52,8 +52,39 @@ set -u
 #     deliberate choice on resume/clear/compact is exactly the bug this
 #     guards against. ---
 _TONE_COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_TONE_COMMON_FILE="$_TONE_COMMON_DIR/tone-common.sh"
+
+# --- Guard the source: a missing, unreadable, truncated or otherwise
+#     corrupt tone-common.sh must never put a line on stderr or a nonzero
+#     exit onto every session start — a partial plugin install degrades to
+#     silence, same as every other fatal condition this handler already
+#     treats that way (see Error handling in the design spec).
+#       1. Read test before sourcing: cheaply catches "missing" (and
+#          "unreadable", e.g. wrong permissions) without relying on the
+#          `source` builtin's own error path at all.
+#       2. `2>/dev/null` on the source itself, plus checking its own exit
+#          status: a corrupt file can still fail to source (a syntax error
+#          from a bad truncation point) even though it passed the read
+#          test above — bash detects that at parse time, before executing
+#          anything in the file, and reports it with a nonzero return from
+#          the `.` builtin and a message on stderr, both handled here.
+#       3. A `command -v` check by name, after a *successful* source: the
+#          truncated-but-syntactically-valid case (cut at a point that
+#          leaves the file parseable but drops one or more function
+#          definitions) sources cleanly and returns 0, so step 2 alone
+#          would miss it. This checks that every function this handler
+#          actually calls below (output_style_is_set, resolve_session_id,
+#          tone_state_dir) exists before relying on any of them. ---
+if [ ! -r "$_TONE_COMMON_FILE" ]; then
+  exit 0
+fi
 # shellcheck source=./tone-common.sh
-. "$_TONE_COMMON_DIR/tone-common.sh"
+. "$_TONE_COMMON_FILE" 2>/dev/null || exit 0
+if ! command -v output_style_is_set >/dev/null 2>&1 \
+  || ! command -v resolve_session_id >/dev/null 2>&1 \
+  || ! command -v tone_state_dir >/dev/null 2>&1; then
+  exit 0
+fi
 
 main() {
   local script_dir styles_dir state_dir input session_id source_val state_file

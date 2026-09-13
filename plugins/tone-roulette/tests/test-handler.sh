@@ -1252,6 +1252,128 @@ raw_settings_project() {
   fi
 }
 
+# =====================================================================
+# Test 35 — a missing tone-common.sh must not turn every session start
+# into stderr noise. A copy of the handler in a fixture directory with no
+# sibling tone-common.sh (simulating a partial install) must produce
+# empty stdout, empty stderr, and exit 0 — see the design spec's Error
+# handling table row for "Shared helper file missing or unreadable".
+# CLAUDE_PLUGIN_ROOT still points at the real PLUGIN_ROOT so the
+# catalogue itself is fine; only the sibling tone-common.sh is absent.
+# =====================================================================
+{
+  fixture_dir="$(new_tmp_dir)/hooks-handlers"
+  mkdir -p "$fixture_dir"
+  cp "$HANDLER" "$fixture_dir/session-start.sh"
+  # deliberately: no tone-common.sh copied alongside it
+
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+  err_file="$(new_tmp_dir)/stderr35"
+  out="$(printf '{"session_id":"%s","source":"startup"}' "$sid" \
+    | HOME="$home" CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" CLAUDE_PROJECT_DIR="$DEFAULT_PROJECT_DIR" \
+      bash "$fixture_dir/session-start.sh" 2>"$err_file")"
+  ec=$?
+  err="$(cat "$err_file" 2>/dev/null)"
+
+  check
+  if [ "$ec" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+    pass "test35: missing tone-common.sh produces empty stdout, empty stderr, exit 0"
+  else
+    fail "test35: missing tone-common.sh gave exit=$ec, stdout='$out', stderr='$err'"
+  fi
+}
+
+# =====================================================================
+# Test 36 — a tone-common.sh truncated mid-function is syntactically
+# broken, so `source` itself fails (a parse error, reported before any of
+# the file executes) — this is the "corrupt" half of the missing-or-
+# unreadable row; the guard's own `2>/dev/null` plus checking the
+# source's exit status must swallow that failure rather than let it
+# reach stderr.
+# =====================================================================
+{
+  fixture_dir="$(new_tmp_dir)/hooks-handlers"
+  mkdir -p "$fixture_dir"
+  cp "$HANDLER" "$fixture_dir/session-start.sh"
+  head -c 400 "$PLUGIN_ROOT/hooks-handlers/tone-common.sh" > "$fixture_dir/tone-common.sh"
+
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+  err_file="$(new_tmp_dir)/stderr36"
+  out="$(printf '{"session_id":"%s","source":"startup"}' "$sid" \
+    | HOME="$home" CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" CLAUDE_PROJECT_DIR="$DEFAULT_PROJECT_DIR" \
+      bash "$fixture_dir/session-start.sh" 2>"$err_file")"
+  ec=$?
+  err="$(cat "$err_file" 2>/dev/null)"
+
+  check
+  if [ "$ec" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+    pass "test36: a tone-common.sh truncated into a syntax error produces empty stdout, empty stderr, exit 0"
+  else
+    fail "test36: truncated (syntax-broken) tone-common.sh gave exit=$ec, stdout='$out', stderr='$err'"
+  fi
+}
+
+# =====================================================================
+# Test 37 — a tone-common.sh that sources cleanly (no syntax error) but
+# defines none of the functions this handler needs — the case a
+# truncation lands on a clean statement boundary, which step 2 of the
+# guard (checking the source's own exit status) alone would not catch.
+# Only the by-name `command -v` check catches this one.
+# =====================================================================
+{
+  fixture_dir="$(new_tmp_dir)/hooks-handlers"
+  mkdir -p "$fixture_dir"
+  cp "$HANDLER" "$fixture_dir/session-start.sh"
+  printf '#!/usr/bin/env bash\n# corrupted: no functions defined\n' > "$fixture_dir/tone-common.sh"
+
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+  err_file="$(new_tmp_dir)/stderr37"
+  out="$(printf '{"session_id":"%s","source":"startup"}' "$sid" \
+    | HOME="$home" CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" CLAUDE_PROJECT_DIR="$DEFAULT_PROJECT_DIR" \
+      bash "$fixture_dir/session-start.sh" 2>"$err_file")"
+  ec=$?
+  err="$(cat "$err_file" 2>/dev/null)"
+
+  check
+  if [ "$ec" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+    pass "test37: a functionless (but syntactically valid) tone-common.sh produces empty stdout, empty stderr, exit 0"
+  else
+    fail "test37: functionless tone-common.sh gave exit=$ec, stdout='$out', stderr='$err'"
+  fi
+}
+
+# =====================================================================
+# Test 38 — normal operation is unaffected: a handler copy with its real,
+# intact sibling tone-common.sh alongside it still rolls and announces
+# exactly as before. Confirms the guard added around the source is inert
+# when the sourced file is fine — tests 1-34 already prove this against
+# HANDLER directly; this proves the *copied* handler (same guard, fresh
+# process, fresh fixture dir) behaves identically.
+# =====================================================================
+{
+  fixture_dir="$(new_tmp_dir)/hooks-handlers"
+  mkdir -p "$fixture_dir"
+  cp "$HANDLER" "$fixture_dir/session-start.sh"
+  cp "$PLUGIN_ROOT/hooks-handlers/tone-common.sh" "$fixture_dir/tone-common.sh"
+
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+  out="$(printf '{"session_id":"%s","source":"startup"}' "$sid" \
+    | HOME="$home" CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" CLAUDE_PROJECT_DIR="$DEFAULT_PROJECT_DIR" \
+      bash "$fixture_dir/session-start.sh")"
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && printf '%s' "$out" | jq -e '.systemMessage | test("rolled")' >/dev/null 2>&1; then
+    pass "test38: with an intact sibling tone-common.sh, the source guard does not change normal roll behaviour"
+  else
+    fail "test38: expected a normal roll with an intact tone-common.sh, got exit=$ec out=$out"
+  fi
+}
+
 echo ""
 echo "Ran $check_count assertions."
 if [ "$fail_count" -gt 0 ]; then

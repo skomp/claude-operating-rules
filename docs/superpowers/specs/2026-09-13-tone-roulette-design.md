@@ -292,6 +292,7 @@ a bug.
 | State file holds the literal value `__off__` | On `resume`/`clear`/`compact`: emit nothing, exit 0, session stays untoned. On `startup`: ignore it and roll fresh, same as any other source |
 | `session_id` absent from stdin | Fall back to a single state file keyed by working directory |
 | Pruning the state directory fails (permission denied, race, etc.) | Swallowed (`2>/dev/null`); the session's own roll/announce/inject already completed and is unaffected |
+| Shared helper file (`tone-common.sh`) missing or unreadable | Emit nothing, exit 0. Checked (readability, then a successful `source`, then that every function the caller uses is actually defined) before either handler does anything else, so a partial install degrades the same way a missing catalogue does |
 
 **`user-prompt-submit.sh` (`UserPromptSubmit`):**
 
@@ -303,6 +304,7 @@ a bug.
 | Gap since the previous prompt is below `GAP_THRESHOLD_SECONDS` (120s) | Emit nothing, exit 0. The timestamp file is still rewritten |
 | `date +%s` itself fails (returns nothing) | Emit nothing, exit 0. Nothing is written or compared |
 | Malformed, empty or closed stdin | `session_id` extraction finds nothing and falls back to a `$PWD`-keyed state file, same as `session-start.sh`; never fatal |
+| Shared helper file (`tone-common.sh`) missing or unreadable | Emit nothing, exit 0. Same guard as `session-start.sh`: readability, then a successful `source`, then that every function this handler uses (`resolve_session_id`, `tone_state_dir`, `tone_is_active`) is actually defined, all checked before anything else runs |
 
 Every failure path exits 0 on both handlers. A hook belonging to a fun plugin must never
 degrade a session.

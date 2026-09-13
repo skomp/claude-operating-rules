@@ -43,8 +43,24 @@
 set -u
 
 _TONE_COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_TONE_COMMON_FILE="$_TONE_COMMON_DIR/tone-common.sh"
+
+# --- Guard the source: same reasoning as session-start.sh's identical
+#     guard (see its comment for the full rationale) — a missing,
+#     unreadable, truncated or otherwise corrupt tone-common.sh must never
+#     put a line on stderr or a nonzero exit onto every prompt submitted in
+#     every session. Checks the three functions this handler actually
+#     calls below (resolve_session_id, tone_state_dir, tone_is_active). ---
+if [ ! -r "$_TONE_COMMON_FILE" ]; then
+  exit 0
+fi
 # shellcheck source=./tone-common.sh
-. "$_TONE_COMMON_DIR/tone-common.sh"
+. "$_TONE_COMMON_FILE" 2>/dev/null || exit 0
+if ! command -v resolve_session_id >/dev/null 2>&1 \
+  || ! command -v tone_state_dir >/dev/null 2>&1 \
+  || ! command -v tone_is_active >/dev/null 2>&1; then
+  exit 0
+fi
 
 # --- A gap shorter than this is unremarkable — ordinary time to read a
 #     reply and type the next message — and is not worth an impatient

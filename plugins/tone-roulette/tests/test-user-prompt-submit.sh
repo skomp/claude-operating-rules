@@ -483,6 +483,146 @@ project_with_output_style() {
   fi
 }
 
+# =====================================================================
+# Test 14 — a missing tone-common.sh must not turn every prompt submitted
+# into stderr noise. A copy of the handler in a fixture directory with no
+# sibling tone-common.sh (simulating a partial install) must produce
+# empty stdout, empty stderr, and exit 0 — see the design spec's Error
+# handling table row for "Shared helper file missing or unreadable". A
+# tone is set up as "impatient" with a large gap in the *real* HOME first,
+# so a version without the guard would actually reach the code that calls
+# the now-undefined functions, rather than happening to stay silent for
+# an unrelated reason (no tone active).
+# =====================================================================
+{
+  fixture_dir="$(new_tmp_dir)/hooks-handlers"
+  mkdir -p "$fixture_dir"
+  cp "$HANDLER" "$fixture_dir/user-prompt-submit.sh"
+  # deliberately: no tone-common.sh copied alongside it
+
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+  write_tone "$home" "$sid" "impatient"
+  write_ts "$home" "$sid" 900
+
+  err_file="$(new_tmp_dir)/stderr14"
+  out="$(printf '{"session_id":"%s"}' "$sid" \
+    | HOME="$home" CLAUDE_PROJECT_DIR="$DEFAULT_PROJECT_DIR" \
+      bash "$fixture_dir/user-prompt-submit.sh" 2>"$err_file")"
+  ec=$?
+  err="$(cat "$err_file" 2>/dev/null)"
+
+  check
+  if [ "$ec" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+    pass "test14: missing tone-common.sh produces empty stdout, empty stderr, exit 0"
+  else
+    fail "test14: missing tone-common.sh gave exit=$ec, stdout='$out', stderr='$err'"
+  fi
+}
+
+# =====================================================================
+# Test 15 — a tone-common.sh truncated mid-function is syntactically
+# broken, so `source` itself fails (a parse error, reported before any of
+# the file executes) — the "corrupt" half of the missing-or-unreadable
+# row. Same impatient-tone-plus-gap setup as test 14, so an unguarded
+# version would actually attempt the now-undefined functions.
+# =====================================================================
+{
+  fixture_dir="$(new_tmp_dir)/hooks-handlers"
+  mkdir -p "$fixture_dir"
+  cp "$HANDLER" "$fixture_dir/user-prompt-submit.sh"
+  head -c 400 "$PLUGIN_ROOT/hooks-handlers/tone-common.sh" > "$fixture_dir/tone-common.sh"
+
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+  write_tone "$home" "$sid" "impatient"
+  write_ts "$home" "$sid" 900
+
+  err_file="$(new_tmp_dir)/stderr15"
+  out="$(printf '{"session_id":"%s"}' "$sid" \
+    | HOME="$home" CLAUDE_PROJECT_DIR="$DEFAULT_PROJECT_DIR" \
+      bash "$fixture_dir/user-prompt-submit.sh" 2>"$err_file")"
+  ec=$?
+  err="$(cat "$err_file" 2>/dev/null)"
+
+  check
+  if [ "$ec" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+    pass "test15: a tone-common.sh truncated into a syntax error produces empty stdout, empty stderr, exit 0"
+  else
+    fail "test15: truncated (syntax-broken) tone-common.sh gave exit=$ec, stdout='$out', stderr='$err'"
+  fi
+}
+
+# =====================================================================
+# Test 16 — a tone-common.sh that sources cleanly (no syntax error) but
+# defines none of the functions this handler needs — the case a
+# truncation lands on a clean statement boundary, which a bare "did the
+# source succeed" check alone would not catch. Only a by-name check
+# catches this one. Same impatient-tone-plus-gap setup as test 14/15.
+# =====================================================================
+{
+  fixture_dir="$(new_tmp_dir)/hooks-handlers"
+  mkdir -p "$fixture_dir"
+  cp "$HANDLER" "$fixture_dir/user-prompt-submit.sh"
+  printf '#!/usr/bin/env bash\n# corrupted: no functions defined\n' > "$fixture_dir/tone-common.sh"
+
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+  write_tone "$home" "$sid" "impatient"
+  write_ts "$home" "$sid" 900
+
+  err_file="$(new_tmp_dir)/stderr16"
+  out="$(printf '{"session_id":"%s"}' "$sid" \
+    | HOME="$home" CLAUDE_PROJECT_DIR="$DEFAULT_PROJECT_DIR" \
+      bash "$fixture_dir/user-prompt-submit.sh" 2>"$err_file")"
+  ec=$?
+  err="$(cat "$err_file" 2>/dev/null)"
+
+  check
+  if [ "$ec" -eq 0 ] && [ -z "$out" ] && [ -z "$err" ]; then
+    pass "test16: a functionless (but syntactically valid) tone-common.sh produces empty stdout, empty stderr, exit 0"
+  else
+    fail "test16: functionless tone-common.sh gave exit=$ec, stdout='$out', stderr='$err'"
+  fi
+}
+
+# =====================================================================
+# Test 17 — normal operation is unaffected: a handler copy with its real,
+# intact sibling tone-common.sh alongside it still injects exactly as
+# before, for an impatient session past the gap threshold. Confirms the
+# guard added around the source is inert when the sourced file is fine —
+# tests 1-13 already prove this against HANDLER directly; this proves the
+# *copied* handler (same guard, fresh process, fresh fixture dir) behaves
+# identically.
+# =====================================================================
+{
+  fixture_dir="$(new_tmp_dir)/hooks-handlers"
+  mkdir -p "$fixture_dir"
+  cp "$HANDLER" "$fixture_dir/user-prompt-submit.sh"
+  cp "$PLUGIN_ROOT/hooks-handlers/tone-common.sh" "$fixture_dir/tone-common.sh"
+
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+  write_tone "$home" "$sid" "impatient"
+  write_ts "$home" "$sid" 660   # 11 minutes
+
+  out="$(printf '{"session_id":"%s"}' "$sid" \
+    | HOME="$home" CLAUDE_PROJECT_DIR="$DEFAULT_PROJECT_DIR" \
+      bash "$fixture_dir/user-prompt-submit.sh")"
+  ec=$?
+  ctx="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)"
+
+  check
+  case "$ctx" in
+    *"11 minutes"*)
+      pass "test17: with an intact sibling tone-common.sh, the source guard does not change normal injection behaviour"
+      ;;
+    *)
+      fail "test17: expected a normal 11-minute injection with an intact tone-common.sh, got exit=$ec out=$out"
+      ;;
+  esac
+}
+
 echo "Checked $check_count assertions in $SCRIPT_DIR/test-user-prompt-submit.sh."
 
 # =====================================================================
