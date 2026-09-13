@@ -338,6 +338,20 @@ Field by field, because two of these were previously left to inference:
 - `ref` is the sender session's **short ref**, copied from `ListAgents` (`2eac95`).
   A session never invents one, and a session that cannot read its own ref omits the
   field rather than guessing.
+- `blocking` appears in two places and they describe different things. **A signal
+  reports how the sender wants this delivery scheduled now; a header records what the
+  sender believed when it wrote that comment.** Four rules follow, and the fourth is
+  the one a live test found missing:
+  1. A sender sets both from one judgement at the moment it writes. They agree when
+     the sender is correct.
+  2. A receiver holding a signal uses the signal's value. It is the newer of the two
+     and it is addressed to this delivery.
+  3. A receiver with no signal reads the newest protocol comment's header. That is the
+     recovery path.
+  4. A receiver seeing the two disagree **uses the signal, continues, and reports the
+     disagreement in its reply.** It is a defect of the sender. It is not a reason to
+     stop. Measured on 2026-09-13: a session that met this stopped and asked a human,
+     which is right when the protocol is silent and wrong once it says what to do.
 - `seq` is this sender's comment count on this issue, starting at 1. The issue body
   counts as 1 when this sender filed the issue to open the thread.
 

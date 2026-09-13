@@ -171,6 +171,13 @@ reading a tree that moves under it — the same reason `parallel-sessions` makes
 reviewer pin a commit before it quotes a `file:line`. Pinning does not rescue it here,
 because the thing the subagent has to understand is the work still being written.
 
+**When the signal and the comment header disagree about `blocking`, use the signal.**
+It is the newer value and it is addressed to this delivery; the header records only
+what the sender believed when it wrote that comment. Continue the work, and say in
+your reply that the two disagreed — it is a defect of the sender, not a reason to
+stop. Stopping to ask is right while a protocol is silent and wrong once it has
+answered. `coordinating-across-repos` §8 owns the field and carries the full rule.
+
 `blocking=yes` is the sender's statement that it cannot continue without an answer, not
 a priority field. Treat it as true. If a peer marks everything blocking, that is a
 defect to raise with its human partner, not a flag to start discounting.
