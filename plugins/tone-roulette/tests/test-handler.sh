@@ -11,6 +11,14 @@
 #
 # Uses `jq` for assertions (allowed in tests; the handler itself must not
 # depend on it). No dependency on `shuf`.
+#
+# Requires bash 4+ (uses `mapfile` and `declare -A`, both introduced in
+# bash 4.0 — this file's own #!/usr/bin/env bash does not guarantee that
+# version). The handler it tests has no such dependency: it is verified
+# clean under bash 3.2, the version macOS ships at /bin/bash, on both the
+# normal and empty-catalogue paths (issue #7 item 2) — `hooks/hooks.json`
+# invokes `bash` from PATH, so the handler may run under 3.2 in the real
+# world even on a machine where this test file cannot.
 
 set -u
 
@@ -809,6 +817,146 @@ days_ago_ts() {
     fi
   else
     fail "test20: expected $cur_file to exist after the run (exit=$ec)"
+  fi
+}
+
+# =====================================================================
+# Test 21 — issue #7 item 1: a closed fd 0 must not hang the handler.
+# Bounded on purpose: a regression here must fail the suite, not hang it.
+# The handler runs in the background with stdin closed (0<&-, not merely
+# empty) and is force-killed if it hasn't exited within ~2s.
+# =====================================================================
+{
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+  out_dir="$(new_tmp_dir)"
+  out_file="$out_dir/test21-out"
+  ec_file="$out_dir/test21-ec"
+
+  ( HOME="$home" CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$HANDLER" 0<&- >"$out_file" 2>/dev/null
+    echo "$?" >"$ec_file" ) &
+  hpid=$!
+
+  hung=1
+  for _i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    if ! kill -0 "$hpid" 2>/dev/null; then
+      hung=0
+      break
+    fi
+    sleep 0.1
+  done
+
+  check
+  if [ "$hung" -eq 1 ]; then
+    kill -9 "$hpid" 2>/dev/null
+    wait "$hpid" 2>/dev/null
+    fail "test21: handler with closed stdin did not exit within ~2s (hang reproduced)"
+  else
+    wait "$hpid" 2>/dev/null
+    ec21="$(cat "$ec_file" 2>/dev/null)"
+    if [ "$ec21" = "0" ]; then
+      pass "test21: handler with closed stdin exits 0 without hanging"
+    else
+      fail "test21: handler with closed stdin exited $ec21, expected 0"
+    fi
+  fi
+}
+
+# =====================================================================
+# Test 22 — issue #7 item 6, variant 1: pruning must not recurse into
+# subdirectories of the state directory. A 40-day-old file inside a
+# subdirectory must survive a startup run (a handler with `-maxdepth 1`
+# removed from its `find` invocation would delete it).
+# =====================================================================
+{
+  home="$(new_tmp_dir)"
+  state_dir="$home/.claude/tone-roulette"
+  mkdir -p "$state_dir/nested"
+
+  nested_stale="$state_dir/nested/old-in-subdir"
+  printf '%s\n' "${TONES[0]}" > "$nested_stale"
+  touch -t "$(days_ago_ts 40)" "$nested_stale"
+
+  cur_sid="$(next_session_id)"
+  run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$cur_sid\",\"source\":\"startup\"}" >/dev/null
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && [ -e "$nested_stale" ]; then
+    pass "test22: a 40-day-old file inside a subdirectory of the state dir survives a startup run"
+  else
+    fail "test22: $nested_stale was removed by a startup run (exit=$ec) — prune recursed into a subdirectory"
+  fi
+}
+
+# =====================================================================
+# Test 23 — issue #7 item 6, variant 2: the current-session exclusion
+# must actually be exercised. Test 16 does not exercise it: a startup run
+# rewrites the current session's own state file, which refreshes its
+# mtime and undoes the 40-day ageing before the prune ever runs, so a
+# handler with the `! -name` exclusion removed entirely still passes
+# test 16. Here the current session's file is made unwritable before the
+# run, so the run's own write attempt fails silently and cannot refresh
+# the mtime — the file stays genuinely 40 days old going into the prune,
+# and only the exclusion (not an accidental mtime refresh) can save it.
+# =====================================================================
+{
+  home="$(new_tmp_dir)"
+  state_dir="$home/.claude/tone-roulette"
+  mkdir -p "$state_dir"
+
+  cur_sid="$(next_session_id)"
+  cur_file="$state_dir/$cur_sid"
+  printf '%s\n' "${TONES[0]}" > "$cur_file"
+  touch -t "$(days_ago_ts 40)" "$cur_file"
+  chmod 400 "$cur_file"
+
+  run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$cur_sid\",\"source\":\"startup\"}" >/dev/null
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && [ -e "$cur_file" ]; then
+    pass "test23: the current session's own 40-day-old state file survives a startup run when it could not have been rewritten (exclusion actually exercised)"
+  else
+    fail "test23: $cur_file was removed by a startup run (exit=$ec) — the current-session exclusion did not fire"
+  fi
+
+  chmod 700 "$cur_file" 2>/dev/null
+}
+
+# =====================================================================
+# Test 24 — issue #7 item 6, variant 3: quoting. `$state_dir` and
+# `$(basename ...)` must be quoted in the find invocation, or a state
+# directory path containing a space or a glob character breaks pruning
+# (word-splitting and/or glob expansion of the unquoted path).
+# =====================================================================
+{
+  home_base="$(new_tmp_dir)"
+  home="$home_base/weird home *name"
+  mkdir -p "$home"
+  state_dir="$home/.claude/tone-roulette"
+  mkdir -p "$state_dir"
+
+  stale_file="$state_dir/stale-in-weird-home"
+  printf '%s\n' "${TONES[0]}" > "$stale_file"
+  touch -t "$(days_ago_ts 40)" "$stale_file"
+
+  cur_sid="$(next_session_id)"
+  out="$(run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$cur_sid\",\"source\":\"startup\"}")"
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && [ ! -e "$stale_file" ]; then
+    pass "test24: a 40-day-old state file is still pruned when \$HOME contains a space and a glob character"
+  else
+    fail "test24: $stale_file survived a startup run under a space+glob \$HOME (exit=$ec) — unquoted \$state_dir/\$(basename ...) breaks pruning"
+  fi
+
+  check
+  if [ "$ec" -eq 0 ] && printf '%s' "$out" | jq . >/dev/null 2>&1; then
+    pass "test24: handler output stays valid JSON when \$HOME contains a space and a glob character"
+  else
+    fail "test24: handler output was not valid JSON under a space+glob \$HOME (exit=$ec, out=$out)"
   fi
 }
 

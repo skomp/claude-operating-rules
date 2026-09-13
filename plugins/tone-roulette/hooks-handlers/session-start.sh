@@ -53,8 +53,21 @@ main() {
   fi
 
   # --- Read stdin (the hook JSON). Never fatal: malformed or empty stdin
-  #     just means session_id extraction below finds nothing. ---
-  input="$(cat 2>/dev/null)"
+  #     just means session_id extraction below finds nothing. Guarded
+  #     against a closed fd 0: with fd 0 closed and no writer, `cat` would
+  #     otherwise block forever — bash reuses the closed fd 0 for the
+  #     command substitution's own capture pipe, so `cat` ends up reading a
+  #     pipe that never sees EOF (issue #7 item 1). Testing fd 0 via a
+  #     throwaway dup to fd 3 costs nothing on the normal piped path and
+  #     never touches fd 0 itself, so that path is unchanged. Claude Code
+  #     always pipes the payload, so a closed fd 0 is not reachable in
+  #     normal use; this guard exists so the handler's own "every path
+  #     exits 0" contract holds even when it isn't. ---
+  input=""
+  if { exec 3<&0; } 2>/dev/null; then
+    exec 3<&-
+    input="$(cat 2>/dev/null)"
+  fi
 
   # --- Extract session_id without jq: a grep+sed pull of the JSON string
   #     field, per Global Constraint 3 and the brief's Step 0 fallback. ---

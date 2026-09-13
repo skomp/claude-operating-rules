@@ -13,6 +13,11 @@
 #
 # No dependency on `shuf`. May use `jq`, but does not need to for this file
 # format (YAML frontmatter, not JSON).
+#
+# Unlike its sibling test-handler.sh, this file has no bash 4 dependency
+# (no `mapfile`, no `declare -A`) and has been verified to run cleanly
+# under bash 3.2, the version macOS ships at /bin/bash (issue #7 item 2).
+# The handler is likewise clean under 3.2 — see test-handler.sh's header.
 
 set -u
 
