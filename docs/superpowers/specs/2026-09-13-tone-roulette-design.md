@@ -50,7 +50,7 @@ use `skills/<name>/SKILL.md`. Both load identically.
 Two jobs that need different mechanisms:
 
 - **Holding** a tone is what output styles are for. They sit at system-prompt level,
-  `/output-style <name>` switches between them, and disabling the plugin removes them.
+  `/config` → Output style switches between them, and disabling the plugin removes them.
   Requirements 4, 5 and 6 come free.
 - **Rolling** a tone is what output styles cannot do. A static Markdown file cannot pick
   randomly. That is the `SessionStart` script's job.
@@ -78,7 +78,9 @@ plugins/tone-roulette/
 │   ├── victorian-explorer.md
 │   ├── telemarketer.md
 │   ├── korinthenkacker.md
-│   └── chain-smoking-defender.md
+│   ├── chain-smoking-defender.md
+│   ├── laconic.md
+│   └── twenty-questions.md
 └── skills/tone/SKILL.md              # /tone, /tone <name>, /tone off, /tone list
 ```
 
@@ -194,8 +196,8 @@ description: World-weary 1940s private eye narrating your codebase
 ```
 
 The ground-rules block enforces requirement 7 and must appear in every file, because a file
-selected natively through `/output-style` is never seen by the script and so cannot have the
-rules prepended to it. That means seventeen copies of the same paragraph, which is a drift
+selected natively through `/config` is never seen by the script and so cannot have the
+rules prepended to it. That means nineteen copies of the same paragraph, which is a drift
 hazard. It is accepted deliberately and guarded by a test asserting that every tone file
 contains the block byte-for-byte.
 
@@ -228,7 +230,7 @@ Every failure path exits 0. A hook belonging to a fun plugin must never degrade 
 
 ## Verification
 
-- `claude plugin details tone-roulette` reports 17 output styles, 1 hook and 1 skill.
+- `claude plugin details tone-roulette` reports 19 output styles, 1 hook and 1 skill.
 - The handler script, run directly with crafted stdin JSON, emits valid JSON for each
   matcher value — asserted with `jq`, not by eye.
 - Rolling repeatedly across many runs yields more than one distinct tone. This proves the
@@ -237,7 +239,7 @@ Every failure path exits 0. A hook belonging to a fun plugin must never degrade 
   state file holds.
 - Every tone file contains the ground-rules block byte-for-byte.
 - Live check, needs a human: enable the plugin, start a session, confirm the announcement
-  appears and the tone holds, and confirm `/output-style` lists all seventeen.
+  appears and the tone holds, and confirm `/config` → Output style lists all nineteen.
 
 ## Known limitations
 
