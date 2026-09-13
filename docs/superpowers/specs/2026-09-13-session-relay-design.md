@@ -321,7 +321,7 @@ Plus an entry in `.claude-plugin/marketplace.json` and a fourth row in `README.m
 ## Verification
 
 The other six skills in this repository are untested, and the README says so. This
-one is testable before it ships, and the live tutorial-tooling fleet is the rig.
+one is testable before it ships, and the live fleet is the rig.
 
 1. **Prove the description fires on the prefix alone.** Send a session a bare
    `session-relay:v1 triage <owner>/<repo>#1 blocking=no` and nothing else — no surrounding
