@@ -115,7 +115,8 @@ main() {
   #     (a genuinely missing/unreadable/stale state file still rolls fresh,
   #     unchanged from before). It can never collide with a real tone name:
   #     tone names are catalogue basenames, and the catalogue is asserted to
-  #     hold exactly eight of those, none named this. ---
+  #     hold none of those named this, whatever the catalogue's current
+  #     size. ---
   off_token="__off__"
   is_off=0
 

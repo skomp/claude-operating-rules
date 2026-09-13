@@ -44,6 +44,11 @@ into a plan document, a session that grew too large to reopen.
   anyway. The mechanism is working in that case; the model is not following the injected
   instruction. A Haiku user who sees no tone is looking at a model limitation, not a broken
   plugin. Other models have not been tested.
+- **Four tones perform doubt or pessimism** — `negative-nancy`, `hedging-hannah`,
+  `second-guess-sid` and `nervous-nellie`. Their hedging is a speech register, not a
+  confidence signal: the underlying assessment is unchanged whether or not the tone is
+  hedging it. If you need to know how confident the assistant actually is, ask directly or
+  switch tones with `/tone <name>`.
 
 ## Two rules to put in your own CLAUDE.md
 
