@@ -91,37 +91,72 @@ An OAuth service, 2026-09-09. Three times in one session you reported a security
 
 The same session had three tests that could not fail, and a demo script `CLAUDE.md` called "an acceptance step" whose only assertion was that its audit-record count matched its request count — so it exited 0 on a chain where **every** request was rejected. Its fix had to break the chain deliberately and show the script fail before showing it pass.
 
-### A search of the content cannot report on the metadata
+### A check reports only on what it examined
 
-This repository, 2026-09-13, preparing it for publication. Two independent audits
-reported the working tree clean of identifying information. Both were right, and both
-were useless: the names were in **commit messages and author emails**, which neither
-audit read. The gap was found by a third pass that happened to look at `git log`.
+**A check is a statement about what it examined at the moment it ran.** Everything
+below is one rule wearing nine costumes, all of them from a single repository on
+2026-09-13, where the same session made the error nine times in a day while writing
+this skill.
 
-One audit was strong by every other measure — 43 needles, proven to fire by planting
-three of them first. It still could not report on a class of data it never opened.
-Then the same shape repeated one level up: a `filter-branch --msg-filter` cleaned
-every message body and left the trailer and the author email untouched, because those
-are metadata about the commit rather than text inside the message. The fix had the
-identical blind spot as the audit that preceded it.
+Each line names what was examined, against what was claimed:
 
-**State what a probe reads, not what it concludes.** "The repository is clean" was
-never supported; "no file content matches these 43 needles" was. The first phrasing
-silently annexes commit messages, authorship, tags, branch names, reflogs and
-remotes; the second invites the obvious question.
+1. **File content, not commit metadata.** Two audits searched the working tree for
+   identifying names and passed. The names were in commit messages and author emails.
+2. **One branch, not a ref that had diverged.** A rewrite cleaned one branch; local
+   `main` had diverged hours earlier and kept the original text.
+3. **Commit messages, not the files those commits add.** A `--msg-filter` cleaned every
+   message. The same commits added files that still carried the names.
+4. **Before a merge, not after.** An audit passed; a later merge reintroduced what it
+   had cleared; nobody re-ran it.
+5. **The working tree, not the ref being published.** A grep of the checkout was
+   reported as "the repository is clean". A different branch was then pushed.
+6. **Clean, but the wrong object.** A branch was verified clean and *was the wrong
+   lineage* — pushing it would have deleted a plugin from the remote. Clean and correct
+   are independent properties.
+7. **A name, not the content.** Six refs shared a `bak-`/`backup-` prefix; three
+   carried names and three did not. The prefix predicted nothing.
+8. **A session's state, not its progress.** `idle` means "not currently working". It
+   does not mean finished — the two are indistinguishable from outside.
+9. **What a terminal displayed, not what happened.** `tmux capture-pane -p` prints
+   characters and discards their styling, so text *drawn* into an empty input box is
+   indistinguishable from text *typed* into it. A session reported an intruder on that
+   basis. `capture-pane -p -e | cat -v` showed `^[[2m` — dim — and a genuinely empty
+   pane had no such run at all.
 
-For anything you are about to call clean before publishing, the surfaces are at
-least: file content, commit messages, author and committer identity, branch and tag
-names, and whatever the forge shows that the local repository does not.
+**Say what the probe read, not what you concluded.** "The repository is clean" was
+never supported. "No file content under these paths matches these 43 names" was. The
+first silently annexes commit messages, authorship, tags, ref names, reflogs and the
+forge; the second invites the obvious question.
+
+**Say what the check can separate.** A check that cannot tell two causes apart cannot
+report which one occurred. Instance 9 is the pure case: the command could not
+distinguish drawn text from entered text, so its output could not mean what it was
+read to mean.
+
+**A theory that explains every property of the evidence is a theory to test.** In
+instance 9 the text was contextual, correctly shaped, in the project's own register,
+and never submitted. Those were read as proof that something knew what the work was
+about. They are the defining properties of generated text.
+
+**A reader inherits the defect, and adds confidence to it.** A second session verified
+its own side rigorously — 33 transcripts, zero hits — then accepted the first
+session's framing without asking whether "text appeared in a pane" had been
+established as "text was entered into a pane". It then supplied reasoning the original
+report never contained and handed it to a person as analysis. Before acting on
+someone's conclusion, ask what their check could separate.
+
+**For a publication check specifically**, the surfaces are at least: file content,
+commit messages, author and committer identity, ref and tag names, and what the forge
+serves — which is not what your local refs say.
 
 ```sh
-git log --all --format='%ae%n%ce' | sort -u     # every identity in the history
-git log --all --format='%B' | grep -iE '<needles>'
-git for-each-ref --format='%(refname)'          # names leak too
+git merge-base --is-ancestor <the-correction> <the-ref-you-publish>  # instances 2 and 5
+git log --all --format='%ae%n%ce' | sort -u                          # identities
+git log --all --format='%B' | grep -iE '<names>'                     # messages
+git grep -lIiE '<names>' <ref> -- .                                  # content, per ref
+git for-each-ref --format='%(refname)'                               # names leak too
 ```
 
-And check the forge, not only your refs: local and remote disagreed here, and the
-published side is the one that matters.
 
 ### A 404 from one endpoint is not proof of absence
 
