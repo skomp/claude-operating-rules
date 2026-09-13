@@ -156,6 +156,18 @@ Bodies follow `tracking-work`: ASD-STE100 Simplified Technical English, and ever
 issue reference written `repo#123`, every pull request `PR: repo#123`. A bare `#123`
 in a cross-repo thread is unresolvable by construction.
 
+**One exception, and it is silent when missed.** In a *closing keyword* — `Closes`,
+`Fixes`, `Resolves`, in a commit message or a pull request body — write the full
+`owner/repo#123`. GitHub's parser acts on `#123` and on `owner/repo#123` only; the
+short `repo#123` form renders as plain text and closes nothing. This protocol files
+issues into repositories other than the one being committed to, so the qualified
+form is the *only* form that works here. After any push whose commits claim to close
+a peer's issue, check it:
+
+```sh
+gh issue list --repo <owner>/<repo> --state open
+```
+
 ### Labels
 
 Two labels, and they exist for one purpose: to make the human's manual check cheap.
