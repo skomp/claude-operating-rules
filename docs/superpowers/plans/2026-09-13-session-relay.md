@@ -50,7 +50,7 @@ Copied verbatim from the spec. Every task's requirements implicitly include thes
 - Prose references an issue as `repo#123` and a pull request as `PR: repo#123`. **A closing keyword takes the full `owner/repo#123`** — GitHub's parser does not act on the short form.
 - Tickets this protocol writes use ASD-STE100 Simplified Technical English, per `tracking-work`.
 - No hooks, no polling, no watcher, no registry file, no slash command.
-- This protocol never requires `skomp/session-signal-router`.
+- This protocol never requires `router-repo`.
 
 ## Already measured — do not re-derive
 
@@ -167,7 +167,7 @@ git commit -m "Add the session-relay plugin manifest"
 5. **The envelope**, with the reasoning for naming the protocol rather than the skill or the message type — a renamed skill would retroactively invalidate headers already permanent in GitHub comments.
 6. **Addressing.** How a sender turns a repository into a session name: `ListAgents`
    gives the live names; the repository name is a *candidate* filter only, because
-   `tutorail-8c` and `tutorial-run` cannot be told apart from outside; the receiver's
+   `alpha-8c` and `alpha-run` cannot be told apart from outside; the receiver's
    ownership guard is what actually decides. If no candidate matches, or every
    candidate replies `not-mine`, say so in your own chat — the issue is filed and
    waits for a session on that repository. State why there is no registry: a
@@ -432,7 +432,7 @@ sweep() {
     grep -qxF -- "$s" <<'ALLOWED'
 session-relay
 created-by-claude
-session-signal-router
+router-repo
 ALLOWED
     test $? -eq 0 || { echo "FAIL: unresolvable skill reference: $s"; return 1; }
   done
@@ -489,9 +489,9 @@ git commit -m "Record the mechanical verification of session-relay"
 
 **Interfaces:**
 - Consumes: Task 5's evidence file.
-- Produces: the answer that `skomp/session-signal-router#1` is waiting on.
+- Produces: the answer that `router-repo#1` is waiting on.
 
-**This task is gated on the human.** It needs the live tutorail fleet and a real repository to file into. Do not simulate it, do not mark items passed by reasoning about them, and do not narrow the README caveat without recorded output. If the fleet is unavailable, stop and report which items remain unrun.
+**This task is gated on the human.** It needs the live fleet and a real repository to file into. Do not simulate it, do not mark items passed by reasoning about them, and do not narrow the README caveat without recorded output. If the fleet is unavailable, stop and report which items remain unrun.
 
 The seven items are in the spec's **Verification** section. Run them in order; item 1 is the one another repository depends on.
 
@@ -513,7 +513,7 @@ Record each item's actual output. A failed item is a finding, not a blocker to h
 
 - [ ] **Step 5: Report item 1's result to the router repository**
 
-Comment on `skomp/session-signal-router#1` with the outcome. That issue states both branches already: the skill loads, so each protocol routes itself and a router is needed only for an unclaimed envelope; or it does not, and a central router becomes necessary.
+Comment on `router-repo#1` with the outcome. That issue states both branches already: the skill loads, so each protocol routes itself and a router is needed only for an unclaimed envelope; or it does not, and a central router becomes necessary.
 
 - [ ] **Step 6: Narrow the README caveat to what was measured**
 

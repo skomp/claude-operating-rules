@@ -6,7 +6,7 @@
 
 ## Problem
 
-A project spans several repositories in layers. The tutorail project is the worked
+A project spans several repositories in layers. The tutorial-tooling project is the worked
 example: a runner that executes tutorials, a repository of tutorial bundles, and a
 repository of authoring tools. A fault observed in one layer usually has its cause
 in another.
@@ -55,9 +55,9 @@ repository will do so, and the coordination never happens.
   lists. Beyond that reach the protocol falls back to the human asking.
 - **Replacing human review.** The protocol escalates; it does not decide.
 - **Depending on a router.** A central dispatcher for inbound signals is under
-  evaluation in `skomp/session-signal-router`, and this protocol must never require
+  evaluation in `router-repo`, and this protocol must never require
   it. Every guard here works with no router installed, and must keep working when
-  one is installed and when it is removed again. `session-signal-router#2` holds
+  one is installed and when it is removed again. `router-repo#2` holds
   that as a requirement on the router, not on this protocol.
 - **Carrying discussion anywhere but GitHub.** A session signal carries a reference
   and routing flags. It never carries a question, an answer or an argument.
@@ -124,7 +124,7 @@ rather than to be correct.
 1. `ListAgents` gives the live session names.
 2. Session names generally derive from the working directory, so the repository name
    is a usable candidate filter — but only a candidate. In the observed fleet
-   `tutorail-8c` and `tutorial-run` cannot be told apart from outside.
+   `alpha-8c` and `alpha-run` cannot be told apart from outside.
 3. The receiver decides. **Once a message is known to be this protocol's**, the
    first thing it checks is whether the issue's repository is the repository this
    session is bound to. If it is not, reply `session-relay:v1 not-mine <ref>` and stop.
@@ -149,7 +149,7 @@ Every protocol comment opens with a machine-readable header and a visible
 attribution line:
 
 ```markdown
-<!-- session-relay:v1 from=bundles repo=skomp/tutorail-bundles ref=2eac95 kind=question seq=3 blocking=yes -->
+<!-- session-relay:v1 from=bundles repo=owner/repo-b ref=2eac95 kind=question seq=3 blocking=yes -->
 **`bundles` → `authoring`** · question · 3 of 10
 ```
 
@@ -321,13 +321,13 @@ Plus an entry in `.claude-plugin/marketplace.json` and a fourth row in `README.m
 ## Verification
 
 The other six skills in this repository are untested, and the README says so. This
-one is testable before it ships, and the live tutorail fleet is the rig.
+one is testable before it ships, and the live fleet is the rig.
 
 1. **Prove the description fires on the prefix alone.** Send a session a bare
    `session-relay:v1 triage <owner>/<repo>#1 blocking=no` and nothing else — no surrounding
    explanation, no mention of issues or peers. The skill must load. If it does not,
    the prefix does not route, and a central dispatcher becomes necessary rather than
-   optional. Record the result in `skomp/session-signal-router#1`, which is waiting
+   optional. Record the result in `router-repo#1`, which is waiting
    on exactly this answer.
 2. **Prove the skill ignores what is not its own.** Send a session an ordinary
    message with no `session-relay:` prefix while the skill is loaded. It must do nothing at
