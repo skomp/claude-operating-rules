@@ -69,7 +69,7 @@ installing the relay never drags in worktree rules, and the reverse.
 | Skill | Trigger |
 |---|---|
 | `coordinating-across-repos` | You find a cause that lives in another repository; you are about to edit a repository you are not bound to; you need to open, answer or close a cross-repo thread. Owns the preconditions, the wire format, the signalling rule and termination. |
-| `handling-an-inbound-ping` | A peer signals you, or the human asks whether there is anything to discuss. Owns the ownership guard, the decision rule and the subagent dispatch. |
+| `handling-an-inbound-ping` | A peer signals you **with a `relay:v1` envelope**, or the human asks whether there is anything to discuss. Owns the envelope discipline, the ownership guard, the decision rule and the subagent dispatch. It has no opinion on any other message. |
 
 The wire format is defined once, in `coordinating-across-repos`, and referenced by
 the other. Two copies of one format is the failure `completing-a-correction`
@@ -99,10 +99,13 @@ at all.
 The signal itself:
 
 ```
-relay: <kind> <owner>/<repo>#<number> blocking=yes|no
+relay:v1 <kind> <owner>/<repo>#<number> blocking=yes|no
 ```
 
-`kind` is the vocabulary the comments use. The sender sets `blocking=yes` only when
+The leading `relay:v1` is the **envelope**. It is the only thing that makes a message
+this protocol's, and it carries the version so a receiver can tell a message it does
+not understand from a message it must ignore. `kind` is the vocabulary the comments
+use. The sender sets `blocking=yes` only when
 it cannot continue its own work without the answer — not because it would prefer one
 soon. A sender that marks everything blocking has removed the receiver's ability to
 protect its own task.
@@ -117,10 +120,11 @@ rather than to be correct.
 2. Session names generally derive from the working directory, so the repository name
    is a usable candidate filter — but only a candidate. In the observed fleet
    `tutorail-8c` and `tutorial-run` cannot be told apart from outside.
-3. The receiver decides. **The first step of handling any inbound signal is to
-   confirm the issue's repository is the repository this session is bound to.** If
-   it is not, reply `relay: not-mine <ref>` and stop. Nothing is read, nothing is
-   written.
+3. The receiver decides. **Once a message is known to be this protocol's**, the
+   first thing it checks is whether the issue's repository is the repository this
+   session is bound to. If it is not, reply `relay:v1 not-mine <ref>` and stop.
+   Nothing is read, nothing is written. What comes before this check is *Envelope
+   discipline* below.
 4. If no candidate matches, or every candidate replies `not-mine`, the sender says
    so in its own chat: the issue is filed and waiting for a session on that
    repository.
@@ -194,9 +198,36 @@ Read only the newest protocol comment of each result. **Do not read every open i
 and every comment.** A recovery check that costs a large fraction of the context
 window is worse than the missed signal it repairs.
 
+### Envelope discipline
+
+**The skill must not consume a message it was not meant to receive.** A session
+receives messages for many reasons, and other skills — present or future — define
+their own. This protocol owns exactly one shape and must be inert for everything
+else.
+
+The guards run in this order, and the order is the point:
+
+1. **Does the message begin with `relay:`?** If not, it is not this protocol's.
+   Ignore it completely: do not act, do not reply, do not report it as unrecognised,
+   do not mark it handled. Hand it back to the session's normal handling, which may
+   include another skill. **A reply is a form of consumption** — answering
+   `not-mine` to a message that was never a relay message claims it.
+2. **Is the version supported?** `relay:v1` is understood. A higher version means the
+   sender knows something this receiver does not. Reply
+   `relay:v1 unsupported version=<v> <ref>` and tell the human. Do not guess at the
+   semantics of a version you do not implement.
+3. **Is the repository mine?** The ownership guard, *Addressing* step 3.
+4. **Is the `kind` one of the five?** If not, reply
+   `relay:v1 unsupported kind=<kind> <ref>` and tell the human. An unknown `kind`
+   inside a known version is a protocol error, not a message to improvise on.
+
+Only a message that passes all four reaches the decision rule below. Guards 2 and 4
+reply because the message *was* addressed to this protocol and silence would strand
+the sender. Guard 1 stays silent because the message was not.
+
 ### Handling an inbound signal
 
-After the ownership guard in *Addressing* step 3:
+After the four guards above:
 
 ```
 blocking?  ──no──→  subagent handles it; the main session continues
@@ -264,18 +295,22 @@ Plus an entry in `.claude-plugin/marketplace.json` and a fourth row in `README.m
 The other six skills in this repository are untested, and the README says so. This
 one is testable before it ships, and the live tutorail fleet is the rig.
 
-1. **Prove the ownership guard rejects.** Signal a session about an issue in a
+1. **Prove the skill ignores what is not its own.** Send a session an ordinary
+   message with no `relay:` prefix while the skill is loaded. It must do nothing at
+   all — no reply, no `not-mine`, no mention that it saw a protocol message. This is
+   the guard most likely to be written and never exercised.
+2. **Prove the ownership guard rejects.** Signal a session about an issue in a
    repository it is not bound to. It must reply `not-mine` and read nothing. A guard
    only ever seen to accept is not evidence.
-2. **Prove one round trip.** File an issue in the bundles repository from the bundles
+3. **Prove one round trip.** File an issue in the bundles repository from the bundles
    session, signal the authoring session, and confirm a `kind=question` comment with
    a correct header appears on the downstream issue and that the bundles session is
    signalled back.
-3. **Prove silence.** Confirm that a session which writes a comment needing no answer
+4. **Prove silence.** Confirm that a session which writes a comment needing no answer
    sends no signal, and that a session with no inbound signal does nothing at all.
-4. **Prove a stuck exit.** Drive a thread to the cap and confirm the stalemate
+5. **Prove a stuck exit.** Drive a thread to the cap and confirm the stalemate
    comment, the label swap and the escalation all happen.
-5. **Prove the recovery check is cheap.** Measure what the manual check reads on a
+6. **Prove the recovery check is cheap.** Measure what the manual check reads on a
    repository with a realistic number of open issues. It must touch only the
    `relay:open` ones.
 
