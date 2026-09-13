@@ -1,22 +1,33 @@
 # claude-operating-rules
 
-Four Claude Code plugins. Three hold rules that were learned the expensive way — each one
-traceable to a specific failure, with the measurement that exposed it kept intact. The
-fourth, `tone-roulette`, is a demonstration rather than a rule; see its row in the table
-below for what that means.
+Five Claude Code plugins, of three kinds. Three hold rules that were learned the
+expensive way — each one traceable to a specific failure, with the measurement that
+exposed it kept intact. `session-relay` is a design, specified and built in one session
+on 2026-09-13, with no incident behind it. `tone-roulette` is neither: a demonstration
+of what a plugin can do beyond skills, and a joke. Each row in the table below says
+which kind it is, because the three are not interchangeable and the difference is the
+point.
 
-Nothing here is advice in the abstract. Every rule exists because something broke: a
-security check that passed because its needle was empty, an agent that reverted a human's
-work because it could not account for it, fourteen defects that all came from code written
-into a plan document, a session that grew too large to reopen.
+Nothing in the first three is advice in the abstract. Every rule there exists because
+something broke: a security check that passed because its needle was empty, an agent that
+reverted a human's work because it could not account for it, fourteen defects that all came
+from code written into a plan document, a session that grew too large to reopen.
+`session-relay` has no such failure yet — what its build session found instead, in one
+sentence: a check whose planted fault could not fail and an addressing rule that could not
+reach one live session in four, both measured on the day and fixed before the plugin
+shipped, plus a guard that would have rejected every real signal if the transport wraps
+what it delivers. That last one was reasoned about, not observed — the guard now strips the
+wrapper before it matches, but no live signal has yet been seen, and the verification item
+that would record the wrapper's real shape has not run.
 
-## The four plugins
+## The five plugins
 
 | Plugin | Install it if | README |
 |---|---|---|
 | **evidence-discipline** | Always. Nothing in it is specific to Claude Code — it is "prove the check can fail before you trust that it passed", and "a fix is not done until every copy of the claim is fixed" | [plugins/evidence-discipline/README.md](plugins/evidence-discipline/README.md) |
 | **agent-operations** | You dispatch subagents or run git worktrees. Useless if you work alone in one session | [plugins/agent-operations/README.md](plugins/agent-operations/README.md) |
 | **ticket-craft** | You want ASD-STE100 Simplified Technical English enforced on every ticket. Deliberately packaged alone, so wanting the verification rules never drags this in | [plugins/ticket-craft/README.md](plugins/ticket-craft/README.md) |
+| **session-relay** | Your project spans multiple repositories, each with its own live Claude session, and you track work in GitHub issues. Skip it if you work in one repository alone, or that repository tracks work on a `TODO.md` — both are hard preconditions the protocol refuses to run without | [plugins/session-relay/README.md](plugins/session-relay/README.md) |
 | **tone-roulette** | You want a demonstration of what a plugin can do beyond skills — output styles, a `SessionStart` hook and a `UserPromptSubmit` hook, two shell handlers sharing common code — rather than another rule. It is a joke, not a lesson: it rolls a random conversational tone at session start and holds it for the session. Skip it if you only want the operating rules | [plugins/tone-roulette/README.md](plugins/tone-roulette/README.md) |
 
 ## Install
@@ -26,6 +37,7 @@ into a plan document, a session that grew too large to reopen.
 /plugin install evidence-discipline
 /plugin install agent-operations
 /plugin install ticket-craft
+/plugin install session-relay
 /plugin install tone-roulette
 ```
 
@@ -61,11 +73,16 @@ failures documented here.
 
 ## Known limitation
 
-These skills have not been tested against a live agent under pressure. They are faithful
-records of failures that already happened, not instruments anyone has watched fire. The
-untested property is retrieval: whether each `description` actually triggers at the moment
-it should. If you find one that does not fire when it ought to, that is the most useful
-issue you could open.
+These skills have not been tested against a live agent under pressure. The first six, in
+`evidence-discipline`, `agent-operations` and `ticket-craft`, are faithful records of
+failures that already happened, not instruments anyone has watched fire. `session-relay`
+is not a record of anything — it is a design, and its two skills have not yet run against
+a live fleet of sessions. That run is scheduled, not done: this section narrows for
+`session-relay` only once the run has actually happened.
+
+The untested property, for all five plugins, is retrieval: whether each `description`
+actually triggers at the moment it should. If you find one that does not fire when it
+ought to, that is the most useful issue you could open.
 
 ## License
 
