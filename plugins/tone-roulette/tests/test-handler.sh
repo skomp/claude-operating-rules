@@ -253,8 +253,7 @@ days_ago_ts() {
 # Chosen so a correct implementation (uniform pick among 8 tones) fails
 # this bar with probability far below any flakiness budget, while a
 # fixed-pick implementation always returns exactly 1 distinct tone and
-# always fails it. See task-2-report.md for how this was confirmed
-# against a deliberately fixed-pick copy of the handler.
+# always fails it.
 # =====================================================================
 {
   declare -A seen=()

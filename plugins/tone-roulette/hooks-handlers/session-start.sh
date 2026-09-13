@@ -8,7 +8,7 @@
 # announcement (`systemMessage`) and the tone body with its YAML frontmatter
 # stripped (`hookSpecificOutput.additionalContext`).
 #
-# Contract (see task-2-brief.md):
+# Contract (see docs/superpowers/specs/2026-09-13-tone-roulette-design.md):
 #   - bash + coreutils only. No jq, no python, no `shuf` (absent on the
 #     target machine) — randomness comes from $RANDOM.
 #   - Every failure path exits 0. On a fatal problem this script prints

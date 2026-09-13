@@ -101,8 +101,8 @@ that could not be confirmed against a working example.
   per-session, and it must never leak into a new one.
 
 State lives at `~/.claude/tone-roulette/<session_id>`, a single line holding the tone name.
-`session_id` comes from the hook's stdin JSON. If the state file is missing when `clear` or
-`compact` fires, the script rolls a fresh tone rather than failing.
+`session_id` comes from the hook's stdin JSON. If the state file is missing when `resume` /
+`clear` / `compact` fires, the script rolls a fresh tone rather than failing.
 
 **Pruning stale state files (issue #6).** After a `startup` roll persists, the handler
 removes other files directly under the state directory whose mtime is older than 30 days,
@@ -171,8 +171,8 @@ Every failure path exits 0. A hook belonging to a fun plugin must never degrade 
   matcher value — asserted with `jq`, not by eye.
 - Rolling repeatedly across many runs yields more than one distinct tone. This proves the
   roll is real and not a fixed pick.
-- `clear` and `compact` with an existing state file return the *same* tone the state file
-  holds.
+- `resume`, `clear` and `compact` with an existing state file return the *same* tone the
+  state file holds.
 - Every tone file contains the ground-rules block byte-for-byte.
 - Live check, needs a human: enable the plugin, start a session, confirm the announcement
   appears and the tone holds, and confirm `/output-style` lists all eight.
