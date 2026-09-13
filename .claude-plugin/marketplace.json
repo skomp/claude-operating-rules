@@ -33,7 +33,7 @@
     {
       "name": "tone-roulette",
       "source": "./plugins/tone-roulette",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "category": "entertainment",
       "description": "Rolls a random conversational tone at session start and holds it for the session.",
       "author": { "name": "skomp", "url": "https://github.com/skomp" }
