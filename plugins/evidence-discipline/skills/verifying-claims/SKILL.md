@@ -123,6 +123,30 @@ Each line names what was examined, against what was claimed:
    basis. `capture-pane -p -e | cat -v` showed `^[[2m` — dim — and a genuinely empty
    pane had no such run at all.
 
+10. **A rendering, not the thing rendered.** The same session then read a terminal's
+   collapsed one-line display of an incoming message — `Message from @…: ` with the
+   sender truncated and the line ending `(ctrl+o to expand)` — and reported it as the
+   message's wire format. It was not. The real message carries a different envelope
+   entirely. Nothing truncates a real message; only a renderer does.
+
+**A rendering is not the thing rendered, and a terminal is a renderer.** Instances 9
+and 10 are one missing sentence, and the second happened after the first had been
+written into this file.
+
+The mechanism, which is what makes that actionable rather than merely wise: the Claude
+Code TUI runs on the **alternate screen**. `tmux capture-pane -S -` returns about 24
+lines regardless of `history-limit`, and tool calls are never in the buffer at all. **A
+pane cannot tell you what a session read.** Only its transcript can:
+
+```sh
+ls ~/.claude/projects/<escaped-cwd>/*.jsonl     # what the session actually did
+tmux capture-pane -p -e -t <pane> | cat -v      # and if you must read a pane, keep the styling
+```
+
+The styled capture matters because `capture-pane` without `-e` discards exactly the
+distinction you need: `^[[2m` marks dim placeholder text the terminal drew, which is
+indistinguishable from typed input once the escape codes are stripped.
+
 **Say what the probe read, not what you concluded.** "The repository is clean" was
 never supported. "No file content under these paths matches these 43 names" was. The
 first silently annexes commit messages, authorship, tags, ref names, reflogs and the
