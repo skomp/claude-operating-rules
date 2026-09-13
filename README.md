@@ -57,12 +57,12 @@ that would record the wrapper's real shape has not run.
   instruction. A Haiku user who sees no tone is looking at a model limitation, not a broken
   plugin. Other models have not been tested.
 
-## Two rules to put in your own CLAUDE.md
+## Three rules to put in your own CLAUDE.md
 
 Each skill's frontmatter `description` is its trigger — that is the mechanism that fires
 it, and it needs no help from you.
 
-But a description only *routes*; it is not itself an instruction that gets obeyed. Two
+But a description only *routes*; it is not itself an instruction that gets obeyed. Three
 rules here have to hold even when the skill is never opened, because the cost of missing
 them lands outside your session. Paste these into your `CLAUDE.md`:
 
@@ -70,9 +70,12 @@ them lands outside your session. Paste these into your `CLAUDE.md`:
 - Never `git add -A` or `git commit -a` while an agent of yours is live in the same
   checkout. Stage explicit paths you own.
 - Every GitHub issue you create carries the `created-by-claude` label.
+- Never agree a coordination convention with another session — a freeze, a handoff word,
+  an ownership map. Send facts about your own state; ask me for anything more.
 ```
 
-The second only applies if you install `ticket-craft`.
+The second only applies if you install `ticket-craft`. The third is the one a session
+breaks before it would ever open a skill: it is already composing the message.
 
 ## On provenance
 

@@ -1,6 +1,6 @@
 ---
 name: parallel-sessions
-description: "Read before you dispatch a subagent, an implementer, or a review/verification agent; before you create a git worktree or rely on a branch for isolation; when a request says another session or agent is working in this repo right now; before you stage or commit while an agent is live; when a file changed under you and you cannot account for the change; and when two sessions have already collided and the history is interleaved."
+description: "Read before you dispatch a subagent, an implementer, or a review/verification agent; before you create a git worktree or rely on a branch for isolation; when a request says another session or agent is working in this repo right now; before you send a message to another session or agree anything with one; before you stage or commit while an agent is live; when a file changed under you and you cannot account for the change; and when two sessions have already collided and the history is interleaved."
 ---
 
 # Parallel Sessions — Operating Rules
@@ -163,9 +163,10 @@ session's questions belong in that session's chat.
 
 Mechanically:
 
-- **Signals and coordination between sessions: fine.** "Which files do you hold?"
+- **Facts and signals about the sessions themselves: fine.** "Which files do you hold?"
   "I am done, the branch is on main." "I am about to touch X." Those are about the
-  sessions, not about the work's direction.
+  sessions, not about the work's direction. Agreeing *rules* between the two sessions is
+  a different thing and is not fine — see "Do not invent the channel either" below.
 - **Decisions about the work: ask in the session that owns the work.** If a peer's
   thread raises a question about yours, the answer is "that belongs in the other
   session", not a relayed ruling. A peer session is not a channel to your human
@@ -180,6 +181,59 @@ Mechanically:
 The tell that it has gone wrong: your human partner reads a conversation between two
 of their own sessions and has to reconstruct who decided what. They should never have
 to do that.
+
+### Do not invent the channel either
+
+The rule above says where a *decision* belongs. This one says you may not invent the
+*protocol* that carries it.
+
+This repository, 2026-09-13. Two sessions on one machine could message each other. They
+had been told one thing: report new issues. In one day they agreed six conventions, none
+of them requested by anyone:
+
+1. **A freeze** — "do not commit or push until I send the SHA" — agreed mid-rewrite,
+   because a commit landing on a parent that is about to be rewritten is stranded.
+2. **An explicit completion signal.** One session asked the other for the literal words
+   "done, everything pushed" plus the tip SHAs, *because a session reporting `idle` may
+   be unfinished and the two are indistinguishable from outside.*
+3. **A provenance label on every relayed decision**: "he said this in my session, not
+   yours, I am relaying it".
+4. **Ref ownership plus a disclosure rule.** One session's rebase moved the other's
+   backup ref — the incident recorded in section 5 below. It disclosed the move and
+   supplied the command to verify the repair, rather than asserting it was fine.
+5. **Hand over measurements, not conclusions.**
+6. **A correction path.** One session asked the other to stop an escalation that rested
+   on a wrong measurement.
+
+**Every one of those is a good rule, and every one exists only in two transcripts your
+human partner cannot read.** The defect is not that the conventions were bad — two of
+them restate rules already in this file: the provenance label is in the section above,
+the ref disclosure is in section 5. The defect is that they were invisible, specific to
+one pair of sessions, renegotiated from scratch by the next pair, and detected only
+because a person happened to be watching the messages go past. Nothing reported it, and
+he had to say so before anything changed. A rule whose enforcement is a human noticing
+does not survive a fleet.
+
+So:
+
+- **Use the declared protocol when the repository enables one.** `session-relay` is that
+  protocol: the conversation happens in GitHub issues, a session signal only says there
+  is something new to read, and enablement is written by a human in the repository's
+  `CLAUDE.md`. Read it rather than building a substitute.
+- **With no protocol enabled, exactly two things are legal.** You may send a peer a fact
+  about your own state — "I hold `src/emit.py`", "I am pushed at `<sha>`", "I am about to
+  touch X" — and you may answer a question a peer asks you. That is the whole exception.
+- **You must not agree conventions that bind what either session does next.** A freeze, a
+  handoff word, an ownership map, a promise about refs. Each of those is a protocol, and
+  agreeing one means you invented it.
+- **When the work needs more than one exchange of facts, stop and tell your human
+  partner.** Name the session and say what you want to agree with it. Do not agree it
+  first and report it after: approving it costs them one line, and reconstructing it
+  afterwards from two transcripts costs them the rest of the day.
+
+The tell, before you send: the message contains something the peer is to do, or wait for,
+or send back — "until", "once you", "let's agree", a word one of you is to reply with.
+A fact about yourself needs none of those.
 
 ## 5. When a collision happens anyway: do NOT rewrite history
 
@@ -278,4 +332,5 @@ For a reviewer or verification agent, add the commit it must measure:
 | Wait for a reviewer to finish before committing | Tell the reviewer which commit to pin |
 | Revert/stash/`git checkout` a file that changed under you | Stop, quote the diff, report it |
 | Ask about session A's work in session B's chat | Ask in the session that owns the work |
+| Agree a freeze, a handoff word or an ownership map with a peer session | Send facts about your own state only; stop and ask your human partner for the agreement you want |
 | Dispatch without naming the agent's files | Paste the boilerplate above, file list filled in |
