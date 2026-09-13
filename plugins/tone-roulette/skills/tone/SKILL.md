@@ -48,7 +48,8 @@ about a tone change unless the state file says so. If the live tone moves but th
 still names the old one, the very next `/clear` or context compaction reads the stale file and
 silently re-injects the tone the user just moved away from — the switch appears to work and
 then quietly reverts. Never report a tone change as complete until the state file has been
-updated (or, for `off`, removed) to match.
+updated to match — a tone name for `/tone <name>` and `/tone roll`, the reserved token
+`__off__` for `/tone off`.
 
 ## Invocations
 
@@ -90,7 +91,10 @@ which tone was rolled. Apply the state-file rule above.
 ### `/tone off`
 
 Stop applying any tone-roulette voice for the rest of the session — return to plain,
-unaffected register from your next reply on — and remove the state file entirely.
+unaffected register from your next reply on — and write the reserved token `__off__` into the
+state file, replacing whatever it held. Do not delete the state file: `__off__` is how "off"
+is recorded, the same way a tone name records a tone. Apply the state-file rule above — the
+write is not optional.
 
 Tell the user two things they need to know about this: `/output-style <name>` is the other,
 independent way to switch tones (it changes Claude Code's built-in output style directly
@@ -99,8 +103,7 @@ rule above — prefer `/tone <name>` when the switch needs to survive a later `/
 compaction); and disabling the `tone-roulette` plugin entirely returns to the default tone
 starting the next session, not this one.
 
-Also be honest about a limitation of `off` itself: it stops the tone for as long as this
-context lives untouched, but the `SessionStart` hook rolls a fresh tone whenever it finds no
-state file — so a `/clear` or compaction after `/tone off` starts a new tone rather than
-staying off. If the user wants to stay tone-free across a compaction, say that disabling the
-plugin is the only path that survives one; `/tone off` is a same-context measure.
+The tone stays off for the rest of *this* session, including across a later `/clear` or
+compaction — the `SessionStart` hook recognises `__off__` in the state file and re-emits
+nothing rather than rolling. A new session starts fresh and rolls again regardless, because
+turning the tone off is a per-session choice, not a permanent one.
