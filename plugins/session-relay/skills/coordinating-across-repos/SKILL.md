@@ -319,7 +319,7 @@ with a machine-readable header and a visible attribution line:
 | `ref` | the sender session's short ref, **copied from `ListAgents`** |
 | `kind` | one of `triage`, `question`, `answer`, `conclusion`, `stalemate` |
 | `seq` | this sender's comment count on this issue, starting at 1 — the issue body counts as 1 when you filed the issue to open the thread |
-| `blocking` | `yes` or `no`, with the meaning in section 4 |
+| `blocking` | `yes` or `no`, with the meaning in section 4 — and see below, because you write it twice |
 
 **The filed issue's body is the thread's first protocol comment.** When you open a
 thread by filing the downstream issue, its body carries this same header and
@@ -333,6 +333,15 @@ its own ref **omits the field** rather than guessing. An invented ref reads exac
 a real one and silently attributes a comment to a session that never wrote it. What it
 buys is telling apart two sessions that both called themselves `bundles` on different
 days — session names repeat, so a name alone does not identify who spoke last week.
+
+**You write `blocking` twice — set both from one judgement, at the same moment.** It
+goes in the signal you send and in the header of the comment that signal announces.
+The signal says how you want this delivery scheduled *now*; the header records what
+you believed when you wrote that comment. A receiver that finds the two disagreeing
+uses the signal, carries on, and reports your mistake back to you — so a disagreement
+costs you a round trip and your credibility on the next one. Measured on 2026-09-13:
+the first live run of this protocol hit exactly this, and the receiving session
+stopped and asked a human because nothing here told it what to do.
 
 `seq` is per sender **and** per issue, because the cap is: two sessions each have their
 own run from 1 to 10 on one issue, and the two comments on the upstream issue are a
