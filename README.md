@@ -17,7 +17,7 @@ into a plan document, a session that grew too large to reopen.
 | **evidence-discipline** | `verifying-claims`, `completing-a-correction` | Always. Nothing in it is specific to Claude Code — it is "prove the check can fail before you trust that it passed", and "a fix is not done until every copy of the claim is fixed" |
 | **agent-operations** | `parallel-sessions`, `writing-plans-and-dispatches`, `recovering-a-session` | You dispatch subagents or run git worktrees. Useless if you work alone in one session |
 | **ticket-craft** | `tracking-work` | You want ASD-STE100 Simplified Technical English enforced on every ticket. Deliberately packaged alone, so wanting the verification rules never drags this in |
-| **tone-roulette** | `tone` | You want a demonstration of what a plugin can do beyond skills — output styles, a `SessionStart` hook, a shell handler — rather than another rule. It is a joke, not a lesson: it rolls a random conversational tone at session start and holds it for the session. Skip it if you only want the operating rules |
+| **tone-roulette** | `tone` | You want a demonstration of what a plugin can do beyond skills — output styles, a `SessionStart` hook and a `UserPromptSubmit` hook, two shell handlers sharing common code — rather than another rule. It is a joke, not a lesson: it rolls a random conversational tone at session start and holds it for the session, and while the `impatient` tone holds, notes a real gap since your last message so it has something true to be impatient about. Skip it if you only want the operating rules |
 
 ## Install
 
@@ -43,6 +43,17 @@ small per-session state file, and re-inject it across compaction. `/tone roll` i
 catalogue, and turning the tone off are all faster done through `/config` directly, and the
 `tone` skill just points you there. See the row above and the design spec's Data flow section
 for the mechanics.
+
+A second hook, on `UserPromptSubmit`, backs the `impatient` tone with a real measurement
+instead of leaving it to invent one: it times the gap since your previous message and, only
+while `impatient` is the tone actually in force, notes it (`"...was 11 minutes ago"`) so the
+tone can be pointedly impatient about something true rather than generically grumbling. It
+fires on every prompt, in every session, for all twenty tones — so for the other nineteen, and
+for anyone who has chosen a different style, it does nothing at all and costs nothing beyond
+one cheap check. Gaps under two minutes go unremarked; the first prompt of a session has
+nothing to compare against yet. Both hooks share their "is a style chosen, which tone is this
+session's" detection from one file (`hooks-handlers/tone-common.sh`) rather than keeping two
+copies of it.
 
 ## tone-roulette: known limitations
 
@@ -71,6 +82,13 @@ for the mechanics.
   confidence signal: the underlying assessment is unchanged whether or not the tone is
   hedging it. If you need to know how confident the assistant actually is, ask directly or
   switch tones via `/config`.
+- **Switching away from `impatient` and back loses the gap history.** The previous-prompt
+  timestamp is only ever read or written while `impatient` is the active tone, so a detour
+  through another tone and back is treated as a fresh session for gap purposes — the next
+  prompt after switching back is never announced as a gap, even if the detour itself was long.
+
+  This is deliberate: the alternative is tracking timestamps for every tone all the time,
+  which is exactly the "cost nothing when not impatient" contract this hook exists to keep.
 
 ## Two rules to put in your own CLAUDE.md
 

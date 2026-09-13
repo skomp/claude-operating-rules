@@ -2,7 +2,7 @@
 # Tests for the tone-roulette output-style catalogue.
 #
 # Verifies:
-#   1. Exactly nineteen .md files exist in output-styles/.
+#   1. Exactly twenty .md files exist in output-styles/.
 #   2. Every file's frontmatter `name` equals its basename without `.md`.
 #   3. Every file contains the ground-rules block byte-for-byte (a single
 #      constant below, never retyped per file).
@@ -61,14 +61,14 @@ if [ ! -d "$STYLES_DIR" ]; then
   exit 1
 fi
 
-# --- Check 1: exactly nineteen .md files ---
+# --- Check 1: exactly twenty .md files ---
 check
 md_files=("$STYLES_DIR"/*.md)
 md_count=${#md_files[@]}
-if [ "$md_count" -eq 19 ]; then
-  pass "exactly nineteen .md files exist in output-styles/ ($md_count found)"
+if [ "$md_count" -eq 20 ]; then
+  pass "exactly twenty .md files exist in output-styles/ ($md_count found)"
 else
-  fail "expected exactly 19 .md files in output-styles/, found $md_count"
+  fail "expected exactly 20 .md files in output-styles/, found $md_count"
 fi
 
 # --- Per-file checks 2, 3, 4, 5, 6 ---

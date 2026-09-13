@@ -1,11 +1,11 @@
 {
   "name": "tone-roulette",
-  "version": "0.2.0",
-  "description": "Rolls a random conversational tone at session start and holds it for the session.",
+  "version": "0.3.0",
+  "description": "Rolls a random conversational tone at session start and holds it for the session; while the impatient tone holds, notes a real gap since the user's last message.",
   "author": { "name": "skomp", "url": "https://github.com/skomp" },
   "homepage": "https://github.com/skomp/claude-operating-rules",
   "repository": "https://github.com/skomp/claude-operating-rules",
   "license": "MIT",
-  "keywords": ["output-style", "tone", "session-start", "fun"],
+  "keywords": ["output-style", "tone", "session-start", "user-prompt-submit", "fun"],
   "outputStyles": "./output-styles/"
 }

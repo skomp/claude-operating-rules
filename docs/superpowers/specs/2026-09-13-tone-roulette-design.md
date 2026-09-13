@@ -41,19 +41,28 @@ Everything below was confirmed against Claude Code 2.1.259 on disk, not from doc
 | `systemMessage` displays a message to the user, for all hook events | same |
 | `outputStyles` is a valid plugin manifest key | manifest key list in the 2.1.259 binary |
 | `force-for-plugin` exists but applies only to plugin output styles | binary carries the guard string `" has force-for-plugin set, but this option only applies to plugin output styles. Ignoring."` |
+| A plugin's `hooks/hooks.json` can declare more than one event; they are sibling keys under one top-level `"hooks"` object, each with its own matcher/hooks array | this plugin's own `hooks/hooks.json`, which declares both `SessionStart` and `UserPromptSubmit` this way |
+| `UserPromptSubmit` accepts `hookSpecificOutput.additionalContext`, same shape as `SessionStart`'s (`{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"..."}}`) | the binary's own hook-output validator lists `additionalContext` as valid "for UserPromptSubmit" (alongside PreToolUse/PermissionRequest/PostToolUse/PostToolBatch/Stop/SubagentStop), and the `/hooks` quick reference's own line for the event: "When the user submits a prompt … Exit code 0 - stdout shown to Claude" |
+| **`UserPromptSubmit` has no matcher support at all** — unlike `SessionStart`, which does | the binary's per-event metadata table gives `SessionStart` a `matcherMetadata` of `{fieldToMatch:"source", values:[...]}`, but `UserPromptSubmit`'s own entry in that same table has no `matcherMetadata` key whatsoever; the `/hooks` TUI's own logic (`ge.matcherMetadata!==void 0`) treats that as "this event has no matcher step" — confirming Step 0's instruction not to assume the two events are identical |
+| `UserPromptSubmit`'s stdin JSON carries `session_id` but **no timestamp field of any kind** | the binary's own input-object construction for this event spreads the same common-fields object every hook input uses (`session_id, transcript_path, cwd, scratchpad_dir, prompt_id, permission_mode, agent_id, agent_type, effort`) plus `hook_event_name, prompt, session_title` — no `timestamp`, `time`, or similar key anywhere in either object literal. The handler must therefore stamp its own wall-clock time (`date +%s`) rather than reading one from the hook payload |
+| `additionalContext` from `UserPromptSubmit` is delivered to the model, not shown to the user in the transcript | same `/hooks` quick-reference line as above: "Exit code 0 - stdout shown to Claude" — the same "to Claude" vs. "to user" distinction the reference uses everywhere else to mark context-only vs. user-visible output; consistent with how this plugin's own `SessionStart` handler already treats `additionalContext` as invisible and reserves user visibility for `systemMessage` |
 
 `commands/*.md` is documented in `example-plugin` as the legacy layout; new plugins should
 use `skills/<name>/SKILL.md`. Both load identically.
 
 ## Architecture
 
-Two jobs that need different mechanisms:
+Three jobs that need different mechanisms:
 
 - **Holding** a tone is what output styles are for. They sit at system-prompt level,
   `/config` → Output style switches between them, and disabling the plugin removes them.
   Requirements 4, 5 and 6 come free.
 - **Rolling** a tone is what output styles cannot do. A static Markdown file cannot pick
   randomly. That is the `SessionStart` script's job.
+- **Being impatient about something true** is what neither of the above can do on its own:
+  a tone file can instruct a *register*, but it cannot know how long the user actually took
+  to reply. That requires a live measurement taken on every turn, which is the
+  `UserPromptSubmit` script's job — see "The gap-measuring hook" below.
 
 The join: **one tone is one file, read two ways.** Each `output-styles/*.md` file is loaded
 natively by Claude Code *and* read by the roll script, which picks one at random, strips the
@@ -62,17 +71,62 @@ tone text that exists in two places.
 
 ```
 plugins/tone-roulette/
-├── .claude-plugin/plugin.json        # "outputStyles": "./output-styles/"
-├── hooks/hooks.json                  # SessionStart, matcher: startup|resume|clear|compact
-├── hooks-handlers/session-start.sh   # roll, persist, announce, inject
-├── output-styles/                    # 19 tone files, one per tone — the directory itself
-│                                      #   is the catalogue; this tree does not enumerate them
-└── skills/tone/SKILL.md              # /tone, /tone roll
+├── .claude-plugin/plugin.json          # "outputStyles": "./output-styles/"
+├── hooks/hooks.json                    # SessionStart (matcher: startup|resume|clear|compact)
+│                                        #   and UserPromptSubmit (no matcher — see Verified
+│                                        #   mechanism facts) as sibling events
+├── hooks-handlers/
+│   ├── tone-common.sh                  # shared helpers: is a style chosen (and which one),
+│   │                                    #   resolve this session's id, the shared state
+│   │                                    #   directory, is a given tone the one in force —
+│   │                                    #   sourced by both handlers below, never run itself
+│   ├── session-start.sh                # roll, persist, announce, inject
+│   └── user-prompt-submit.sh           # measure the gap since the previous prompt; inject a
+│                                        #   factual line only while impatient is the active tone
+├── output-styles/                      # 20 tone files, one per tone — the directory itself
+│                                        #   is the catalogue; this tree does not enumerate them
+└── skills/tone/SKILL.md                # /tone, /tone roll
 ```
 
 `force-for-plugin` is deliberately **not** used. It force-applies a single style, which is
 the opposite of rolling one, and avoiding it removes the design's only dependency on a field
 that could not be confirmed against a working example.
+
+### The gap-measuring hook
+
+`impatient` is the one tone in the catalogue whose register is *about* something measurable —
+real elapsed time — rather than a fixed personality, so it is the one tone this plugin backs
+with a live fact instead of leaving the model to invent one. `hooks-handlers/user-prompt-submit.sh`
+fires on every `UserPromptSubmit` event, in every session where the plugin is enabled, for
+every tone — so its first and only unconditional job is to cost nothing when its output would
+be pointless: it calls `tone_is_active "impatient" session_id state_dir` (in `tone-common.sh`)
+before touching any state, and returns immediately, printing nothing, whenever that answer is
+no. `tone_is_active` implements exactly the rule the brief specified: an explicitly chosen
+`outputStyle` of `impatient` counts (checked first, since a chosen style pre-empts a rolled one
+everywhere else in this plugin), and otherwise the tone `session-start.sh` most recently rolled
+or resumed into this session's state file counts.
+
+When impatient *is* active, the handler reads a second per-session file —
+`~/.claude/tone-roulette/<session_id>.last-prompt`, a single line holding the unix time of the
+prompt before this one — computes the gap against `date +%s`, and, only when that gap is at
+least `GAP_THRESHOLD_SECONDS` (120 — two minutes; a shorter gap is normal reading-and-typing
+time, not a real wait), emits
+`{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"Factual note
+for tone purposes: the user's previous message in this session was <N minutes/hours/days> ago."}}`.
+The timestamp file is rewritten on every impatient-active turn regardless of whether this run
+injects anything, so the reference point for the *next* prompt is always "the previous
+prompt", not "the last time a gap happened to clear the threshold". The first prompt of a
+session (no `.last-prompt` file yet) and a malformed one (anything not a plain non-negative
+integer) are both treated the same way as "no previous timestamp" — inject nothing, still
+write the current time for next turn.
+
+This file deliberately sits beside `session-start.sh`'s own `~/.claude/tone-roulette/<session_id>`
+file rather than inventing a second state location, with a `.last-prompt` suffix rather than a
+second line in that same file: several of `test-handler.sh`'s own assertions compare that
+file's *entire* content, byte-for-byte, against a bare tone name or the literal `__off__`, so
+appending anything to it would have broken every one of them. A sibling file in the same
+directory gets a second per-session fact into the one place this plugin already keeps
+per-session state, without touching a format other tests already pin down.
 
 ## Data flow
 
@@ -162,7 +216,29 @@ session loses its tone. The current session's own file is excluded by name and i
 removed regardless of age. Age is the only available signal (session ids are UUIDs; the
 handler has no way to ask whether a session ended), and 30 days is generous specifically
 because `resume`/`clear`/`compact` never rewrite the state file, so a long-running session's
-file keeps its original `startup` mtime for as long as the session stays open.
+file keeps its original `startup` mtime for as long as the session stays open. This same prune
+also sweeps up a stale session's leftover `<session_id>.last-prompt` file (see "The gap-measuring
+hook" above) once its tone file ages past 30 days, since neither is excluded by name except the
+current run's own tone file.
+
+`get_output_style_value()` (the value-returning form of the check above), `resolve_session_id()`
+and `tone_state_dir()` were extracted into `hooks-handlers/tone-common.sh` once
+`user-prompt-submit.sh` needed the identical "is a style chosen, and which session's state file
+does this stdin's `session_id` name" detection — not rewritten, only relocated, so both handlers
+share one copy instead of one of them drifting from the other. `session-start.sh` sources it and
+otherwise behaves exactly as described above; the extraction is invisible from stdin/stdout.
+
+### The impatience gap
+
+`user-prompt-submit.sh` fires on `UserPromptSubmit` — a different event from `SessionStart`,
+with no matcher of its own (see Verified mechanism facts) and a different stdin shape (`prompt`
+instead of `source`; no `outputStyle`, and — checked specifically because a gap measurement
+was the point — no timestamp field of any kind, so the handler stamps its own via `date +%s`).
+It shares `tone-common.sh`'s `tone_is_active()` to decide, before reading or writing anything,
+whether `impatient` is the tone in force for this session (a chosen `outputStyle` of `impatient`,
+or, with none chosen, a rolled tone of `impatient` in `session-start.sh`'s own state file). See
+"The gap-measuring hook" under Architecture for the rest of the mechanism (the `.last-prompt`
+file, the threshold, the phrasing), and Error handling below for its failure paths.
 
 ## Tone file format
 
@@ -183,7 +259,7 @@ description: World-weary 1940s private eye narrating your codebase
 
 The ground-rules block enforces requirement 7 and must appear in every file, because a file
 selected natively through `/config` is never seen by the script and so cannot have the
-rules prepended to it. That means nineteen copies of the same paragraph, which is a drift
+rules prepended to it. That means twenty copies of the same paragraph, which is a drift
 hazard. It is accepted deliberately and guarded by a test asserting that every tone file
 contains the block byte-for-byte.
 
@@ -206,6 +282,8 @@ a bug.
 
 ## Error handling
 
+**`session-start.sh` (`SessionStart`):**
+
 | Condition | Behaviour |
 |---|---|
 | An output style is explicitly set (`outputStyle` in any settings file the handler can read) | Emit nothing, exit 0. Checked first, before the catalogue or the state file, on every source — not only `startup` |
@@ -214,12 +292,26 @@ a bug.
 | State file holds the literal value `__off__` | On `resume`/`clear`/`compact`: emit nothing, exit 0, session stays untoned. On `startup`: ignore it and roll fresh, same as any other source |
 | `session_id` absent from stdin | Fall back to a single state file keyed by working directory |
 | Pruning the state directory fails (permission denied, race, etc.) | Swallowed (`2>/dev/null`); the session's own roll/announce/inject already completed and is unaffected |
+| Shared helper file (`tone-common.sh`) missing or unreadable | Emit nothing, exit 0. Checked (readability, then a successful `source`, then that every function the caller uses is actually defined) before either handler does anything else, so a partial install degrades the same way a missing catalogue does |
 
-Every failure path exits 0. A hook belonging to a fun plugin must never degrade a session.
+**`user-prompt-submit.sh` (`UserPromptSubmit`):**
+
+| Condition | Behaviour |
+|---|---|
+| `impatient` is not the tone in force (a different style is chosen, or the state file names a different tone, or nothing is active) | Emit nothing, exit 0. Checked first, before the timestamp file is read or written — this is the "cost nothing" contract |
+| First prompt of the session (no `.last-prompt` file yet) | Emit nothing, exit 0. Write the current time so the *next* prompt has something to compare against |
+| `.last-prompt` file holds anything other than a plain non-negative integer (corrupted, truncated, hand-edited) | Treated the same as "no previous timestamp" — emit nothing, overwrite it with the current time |
+| Gap since the previous prompt is below `GAP_THRESHOLD_SECONDS` (120s) | Emit nothing, exit 0. The timestamp file is still rewritten |
+| `date +%s` itself fails (returns nothing) | Emit nothing, exit 0. Nothing is written or compared |
+| Malformed, empty or closed stdin | `session_id` extraction finds nothing and falls back to a `$PWD`-keyed state file, same as `session-start.sh`; never fatal |
+| Shared helper file (`tone-common.sh`) missing or unreadable | Emit nothing, exit 0. Same guard as `session-start.sh`: readability, then a successful `source`, then that every function this handler uses (`resolve_session_id`, `tone_state_dir`, `tone_is_active`) is actually defined, all checked before anything else runs |
+
+Every failure path exits 0 on both handlers. A hook belonging to a fun plugin must never
+degrade a session.
 
 ## Verification
 
-- `claude plugin details tone-roulette` reports 19 output styles, 1 hook and 1 skill.
+- `claude plugin details tone-roulette` reports 20 output styles, 2 hooks and 1 skill.
 - The handler script, run directly with crafted stdin JSON, emits valid JSON for each
   matcher value — asserted with `jq`, not by eye.
 - Rolling repeatedly across many runs yields more than one distinct tone. This proves the
@@ -227,8 +319,22 @@ Every failure path exits 0. A hook belonging to a fun plugin must never degrade 
 - `resume`, `clear` and `compact` with an existing state file return the *same* tone the
   state file holds.
 - Every tone file contains the ground-rules block byte-for-byte.
+- `user-prompt-submit.sh`, run directly with crafted stdin JSON and a pre-seeded
+  `.last-prompt` file, injects only when `impatient` is the active tone and the gap is at
+  least `GAP_THRESHOLD_SECONDS`; stays silent for every other tone, for a chosen non-impatient
+  style even over a stale impatient state file, on the first prompt of a session, and below
+  the threshold — each asserted directly, not inferred from the absence of a crash.
+- **A broken variant with the "is impatient active" check removed was run against the same,
+  unmodified test suite** (`tests/test-user-prompt-submit.sh`) to confirm the suite actually
+  discriminates rather than merely running: it caught the break on 4 of its 19 assertions —
+  both assertions of test1 (a different rolled tone must produce no output *and* must leave
+  the timestamp file untouched), test2 (a chosen non-impatient style must stand the hook down
+  even over a stale impatient state file), and the second assertion of test13 (no tone active
+  at all must not write a timestamp file either). This is exactly the failure that matters: a
+  hook that injects for every tone, in every session, for every user who picked a different
+  style.
 - Live check, needs a human: enable the plugin, start a session, confirm the announcement
-  appears and the tone holds, and confirm `/config` → Output style lists all nineteen.
+  appears and the tone holds, and confirm `/config` → Output style lists all twenty.
 
 ## Known limitations
 
@@ -275,6 +381,22 @@ Every failure path exits 0. A hook belonging to a fun plugin must never degrade 
   for the substance: "I think the tests maybe passed?" reads as uncertainty about the test
   result, when the result itself was never in doubt. Anyone who needs the assistant's actual
   confidence should ask directly or switch tones via `/config`.
+- **Switching away from `impatient` and back resets the gap history.** The timestamp file is
+  only ever read or written while `impatient` is the active tone (see "cost nothing" in
+  Architecture); a session that rolls `impatient`, gets re-rolled to something else, and is
+  later switched back will find no `.last-prompt` file and treat the next prompt as the first
+  one — silently, not a bug report waiting to happen, but a real gap the mechanism does not
+  track across a detour through another tone.
+- **The gap is measured against the machine's own clock, with no correction for clock changes
+  or suspend/resume.** A system clock adjusted backwards between two prompts (NTP correction,
+  manual change, a laptop waking with a slow clock) can produce a negative or understated gap,
+  which the handler simply treats as "below threshold" rather than flagging the anomaly —
+  consistent with every other failure path here (never crash, never degrade the session), but
+  worth naming as a case where the injected fact could be wrong on a machine with an unreliable
+  clock.
+- **The threshold (`GAP_THRESHOLD_SECONDS`, 120s) is a fixed constant, not configurable.**
+  Every user of the `impatient` tone gets the same two-minute floor; there is no per-user or
+  per-session tuning, by design (the brief calls for "a sensible floor", not a setting).
 
 ## Out of scope
 

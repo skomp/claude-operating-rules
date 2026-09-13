@@ -1,5 +1,5 @@
 {
-  "description": "Rolls a random conversational tone at startup, re-injects the held tone on resume, clear or compact, and never fires on fork.",
+  "description": "Rolls a random conversational tone at startup, re-injects the held tone on resume, clear or compact, never fires on fork, and — while the impatient tone holds — notes a real gap since the user's last message.",
   "hooks": {
     "SessionStart": [
       {
@@ -8,6 +8,16 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-start.sh\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/user-prompt-submit.sh\""
           }
         ]
       }

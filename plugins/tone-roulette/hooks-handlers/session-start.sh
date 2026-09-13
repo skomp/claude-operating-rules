@@ -9,7 +9,7 @@
 # stripped (`hookSpecificOutput.additionalContext`). Stands down entirely —
 # prints nothing, does nothing — when the user has already chosen a Claude
 # Code output style through the harness's own settings mechanism; see
-# output_style_is_set() below.
+# output_style_is_set() in tone-common.sh (sourced below).
 #
 # Contract (see docs/superpowers/specs/2026-09-13-tone-roulette-design.md):
 #   - bash + coreutils only. No jq, no python, no `shuf` (absent on the
@@ -31,82 +31,60 @@
 
 set -u
 
-# --- Detect whether the user has explicitly chosen a Claude Code output
-#     style (see docs/superpowers/specs/2026-09-13-tone-roulette-design.md,
-#     "Data flow" and "Known limitations"). When one is set, Claude Code's
-#     own output-style machinery owns the tone for this session and this
-#     hook must get out of the way entirely — on every source (startup,
-#     resume, clear, compact, fork), not just startup. Re-injecting the
-#     state file's tone over a deliberate choice on resume/clear/compact is
-#     exactly the bug this guards against.
-#
-#     `outputStyle` is a plain top-level string key that can live in any
-#     Claude Code settings file. This checks the same precedence order
-#     Claude Code itself applies (highest first), stopping at the first
-#     file that actually sets the key:
-#       1. Managed settings (organization policy) — the file-based form
-#          only. An MDM profile (macOS) or an HKLM/HKCU registry value
-#          (Windows) is not a file this script can read, and neither is a
-#          `claude --settings` CLI override for this session — it is never
-#          written to disk or exposed to a hook's stdin/env. Both are
-#          silent gaps; see Known limitations in the design spec.
-#       2. Project local settings  (.claude/settings.local.json)
-#       3. Shared project settings (.claude/settings.json)
-#       4. User settings           (~/.claude/settings.json)
-#     $CLAUDE_PROJECT_DIR is what Claude Code itself sets in a command
-#     hook's environment for the project root (confirmed by reading the
-#     installed `claude` binary's strings: hook subprocesses are spawned
-#     with CLAUDE_PROJECT_DIR already in their env); $PWD is the fallback
-#     for a standalone or test invocation where it is unset.
-#
-#     The extraction is the same grep+sed pull already used below for
-#     session_id/source, but run over the file's content with newlines
-#     flattened first, not over the file line-by-line. `grep -o` (without
-#     `-z`) only ever matches within a single line, so legal, formatter- or
-#     hand-produced JSON that breaks the key, the colon or the value onto
-#     separate lines — `"outputStyle"\n: "pirate"` and its variants — would
-#     otherwise never match and would read as "not set", which is a false
-#     negative on exactly the case this function exists for: standing down
-#     when a style IS set. Translating every CR and LF in the file to a
-#     space before grepping closes that gap while staying a single-line
-#     regex pull: a JSON string cannot contain a literal, unescaped newline
-#     (it must be written as the two-character escape `\n`), so a real
-#     newline only ever appears in JSON as insignificant whitespace between
-#     tokens — between the key and the colon, the colon and the value, or
-#     around either — never inside the value itself. Replacing it with a
-#     space therefore cannot merge two distinct tokens into a false match;
-#     it only restores the whitespace-only role a run of `[[:space:]]`
-#     already accounted for in this pattern. The extraction is otherwise
-#     exact, not a heuristic: Claude Code constrains an outputStyle value to
-#     ^[a-z][a-z0-9_-]*$ (a plugin style's catalogue name) or one of five
-#     capitalized built-in names, so it can never contain a quote. Global
-#     Constraint 3 forbids jq/python in this handler, not this kind of
-#     single-line regex pull over flattened text. ---
-output_style_is_set() {
-  local project_dir candidates=() f val flattened
+# --- Shared helpers (get_output_style_value/output_style_is_set,
+#     sanitize_id, resolve_session_id, tone_state_dir, tone_is_active) live
+#     in tone-common.sh, sourced from the plugin's own directory so this
+#     handler works both under CLAUDE_PLUGIN_ROOT and invoked standalone.
+#     They were extracted from here verbatim (not rewritten) once a second
+#     handler — hooks-handlers/user-prompt-submit.sh — needed the exact
+#     same "has the user explicitly chosen an output style, and what is
+#     this session's id" detection this file always used; see
+#     tone-common.sh's own header for the full rationale each function
+#     used to carry inline here, and
+#     docs/superpowers/specs/2026-09-13-tone-roulette-design.md's
+#     "Detecting a chosen style" section for the exactness argument behind
+#     the grep+sed pull. output_style_is_set() below is the same
+#     boolean-only check this file always called at this point: when it
+#     signals a style is set, Claude Code's own output-style machinery
+#     owns the tone for this session and this hook must get out of the way
+#     entirely — on every source (startup, resume, clear, compact, fork),
+#     not just startup. Re-injecting the state file's tone over a
+#     deliberate choice on resume/clear/compact is exactly the bug this
+#     guards against. ---
+_TONE_COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_TONE_COMMON_FILE="$_TONE_COMMON_DIR/tone-common.sh"
 
-  case "$(uname -s 2>/dev/null)" in
-    Darwin) candidates+=("/Library/Application Support/ClaudeCode/managed-settings.json") ;;
-    Linux)  candidates+=("/etc/claude-code/managed-settings.json") ;;
-  esac
-
-  project_dir="${CLAUDE_PROJECT_DIR:-$PWD}"
-  candidates+=(
-    "$project_dir/.claude/settings.local.json"
-    "$project_dir/.claude/settings.json"
-    "${HOME:-}/.claude/settings.json"
-  )
-
-  for f in "${candidates[@]}"; do
-    [ -n "$f" ] && [ -r "$f" ] || continue
-    flattened="$(tr '\r\n' '  ' < "$f" 2>/dev/null)"
-    val="$(printf '%s' "$flattened" | grep -o '"outputStyle"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed -E 's/^"outputStyle"[[:space:]]*:[[:space:]]*"(.*)"$/\1/')"
-    if [ -n "$val" ]; then
-      return 0
-    fi
-  done
-  return 1
-}
+# --- Guard the source: a missing, unreadable, truncated or otherwise
+#     corrupt tone-common.sh must never put a line on stderr or a nonzero
+#     exit onto every session start — a partial plugin install degrades to
+#     silence, same as every other fatal condition this handler already
+#     treats that way (see Error handling in the design spec).
+#       1. Read test before sourcing: cheaply catches "missing" (and
+#          "unreadable", e.g. wrong permissions) without relying on the
+#          `source` builtin's own error path at all.
+#       2. `2>/dev/null` on the source itself, plus checking its own exit
+#          status: a corrupt file can still fail to source (a syntax error
+#          from a bad truncation point) even though it passed the read
+#          test above — bash detects that at parse time, before executing
+#          anything in the file, and reports it with a nonzero return from
+#          the `.` builtin and a message on stderr, both handled here.
+#       3. A `command -v` check by name, after a *successful* source: the
+#          truncated-but-syntactically-valid case (cut at a point that
+#          leaves the file parseable but drops one or more function
+#          definitions) sources cleanly and returns 0, so step 2 alone
+#          would miss it. This checks that every function this handler
+#          actually calls below (output_style_is_set, resolve_session_id,
+#          tone_state_dir) exists before relying on any of them. ---
+if [ ! -r "$_TONE_COMMON_FILE" ]; then
+  exit 0
+fi
+# shellcheck source=./tone-common.sh
+. "$_TONE_COMMON_FILE" 2>/dev/null || exit 0
+if ! command -v output_style_is_set >/dev/null 2>&1 \
+  || ! command -v resolve_session_id >/dev/null 2>&1 \
+  || ! command -v tone_state_dir >/dev/null 2>&1; then
+  exit 0
+fi
 
 main() {
   local script_dir styles_dir state_dir input session_id source_val state_file
@@ -121,7 +99,7 @@ main() {
     return 0
   fi
 
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  script_dir="$_TONE_COMMON_DIR"
 
   if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
     styles_dir="${CLAUDE_PLUGIN_ROOT}/output-styles"
@@ -161,20 +139,12 @@ main() {
     input="$(cat 2>/dev/null)"
   fi
 
-  # --- Extract session_id without jq: a grep+sed pull of the JSON string
-  #     field, per Global Constraint 3 and the brief's Step 0 fallback. ---
-  session_id="$(printf '%s' "$input" 2>/dev/null | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed -E 's/^"session_id"[[:space:]]*:[[:space:]]*"(.*)"$/\1/')"
-
-  # --- Sanitise session_id with the same rule the $PWD fallback below
-  #     already uses. session_id is expected to be a UUID from Claude Code,
-  #     not attacker input, but nothing about composing it directly into
-  #     "$state_dir/$session_id" stopped a value like "../../escaped" from
-  #     writing outside the state directory. Applying the identical `tr`
-  #     here means both the stdin-supplied id and the $PWD fallback share
-  #     one hygiene rule instead of only one of them being safe. A missing
-  #     or empty session_id sanitises to itself (empty), so the fallback
-  #     checks below are unaffected. ---
-  session_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9_.-' '_')"
+  # --- Resolve session_id via the shared helper (extract from stdin JSON,
+  #     sanitise, fall back to a sanitised $PWD and then "_") — the exact
+  #     resolution this file always used, now shared with
+  #     user-prompt-submit.sh so both handlers key the same session's state
+  #     on the same string. See tone-common.sh's resolve_session_id(). ---
+  session_id="$(resolve_session_id "$input")"
 
   # --- Extract source the same way: it names the matcher value
   #     (startup|resume|clear|compact|fork), and decides whether a leftover
@@ -182,19 +152,9 @@ main() {
   #     (startup always rolls fresh — see the off-token handling below). ---
   source_val="$(printf '%s' "$input" 2>/dev/null | grep -o '"source"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed -E 's/^"source"[[:space:]]*:[[:space:]]*"(.*)"$/\1/')"
 
-  if [ -z "$session_id" ]; then
-    # Fallback: key the state file on a sanitised $PWD instead.
-    session_id="$(printf '%s' "$PWD" | tr -c 'A-Za-z0-9_.-' '_')"
-  fi
-  if [ -z "$session_id" ]; then
-    # $PWD was somehow empty too. Nothing safe to key state on; still roll,
-    # just don't persist.
-    session_id="_"
-  fi
-
   # --- State directory. Create if absent; if we can't, we simply can't
   #     persist a resume — still roll and announce below. ---
-  state_dir="${HOME:-}/.claude/tone-roulette"
+  state_dir="$(tone_state_dir)"
   mkdir -p "$state_dir" 2>/dev/null
   state_file=""
   if [ -d "$state_dir" ]; then
