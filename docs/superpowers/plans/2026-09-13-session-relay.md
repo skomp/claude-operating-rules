@@ -491,7 +491,7 @@ git commit -m "Record the mechanical verification of session-relay"
 - Consumes: Task 5's evidence file.
 - Produces: the answer that `router-repo#1` is waiting on.
 
-**This task is gated on the human.** It needs the live tutorial-tooling fleet and a real repository to file into. Do not simulate it, do not mark items passed by reasoning about them, and do not narrow the README caveat without recorded output. If the fleet is unavailable, stop and report which items remain unrun.
+**This task is gated on the human.** It needs the live fleet and a real repository to file into. Do not simulate it, do not mark items passed by reasoning about them, and do not narrow the README caveat without recorded output. If the fleet is unavailable, stop and report which items remain unrun.
 
 The seven items are in the spec's **Verification** section. Run them in order; item 1 is the one another repository depends on.
 
