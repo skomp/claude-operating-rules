@@ -31,6 +31,14 @@
       "author": { "name": "skomp", "url": "https://github.com/skomp" }
     },
     {
+      "name": "session-relay",
+      "source": "./plugins/session-relay",
+      "version": "0.1.0",
+      "category": "development",
+      "description": "One session owns one repository. Work that belongs to another repository becomes an issue filed against it and a signal to the session that owns it; the discussion then happens only in GitHub issue comments, each one naming the session that wrote it.",
+      "author": { "name": "skomp", "url": "https://github.com/skomp" }
+    },
+    {
       "name": "tone-roulette",
       "source": "./plugins/tone-roulette",
       "version": "0.1.0",

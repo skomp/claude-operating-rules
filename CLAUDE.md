@@ -7,7 +7,7 @@ creates with `created-by-claude`.
 
 ## What this repository is
 
-This repository holds four Claude Code plugins. The skills come from real failures
+This repository holds five Claude Code plugins. The skills come from real failures
 in other projects. The project names are redacted. The dates, commands, error strings
 and measurements are verbatim, and you must keep them that way.
 
