@@ -205,6 +205,19 @@ receives messages for many reasons, and other skills — present or future — d
 their own. This protocol owns exactly one shape and must be inert for everything
 else.
 
+**The prefix is both the trigger and the guard, and they are different
+mechanisms.** The guard below runs inside a skill that is already in context. What
+puts it there is its frontmatter `description`, which is the only retrieval
+mechanism a skill has. So the description of `handling-an-inbound-ping` must name
+the literal string `relay:` and must say that the skill is inert for anything else.
+A description that says "handles messages from peer sessions" routes every protocol
+to this one skill and makes the guard the only thing standing between them.
+
+Written that way, each protocol routes itself by its own prefix and needs no central
+dispatcher. That claim is untested — it is the same retrieval property this
+repository's `README.md` already admits is unproven for all six existing skills — so
+it is a verification item below, not an assumption.
+
 The guards run in this order, and the order is the point:
 
 1. **Does the message begin with `relay:`?** If not, it is not this protocol's.
@@ -295,22 +308,28 @@ Plus an entry in `.claude-plugin/marketplace.json` and a fourth row in `README.m
 The other six skills in this repository are untested, and the README says so. This
 one is testable before it ships, and the live tutorail fleet is the rig.
 
-1. **Prove the skill ignores what is not its own.** Send a session an ordinary
+1. **Prove the description fires on the prefix alone.** Send a session a bare
+   `relay:v1 triage <owner>/<repo>#1 blocking=no` and nothing else — no surrounding
+   explanation, no mention of issues or peers. The skill must load. If it does not,
+   the prefix does not route, and a central dispatcher becomes necessary rather than
+   optional. Record the result in `skomp/session-signal-router#1`, which is waiting
+   on exactly this answer.
+2. **Prove the skill ignores what is not its own.** Send a session an ordinary
    message with no `relay:` prefix while the skill is loaded. It must do nothing at
    all — no reply, no `not-mine`, no mention that it saw a protocol message. This is
    the guard most likely to be written and never exercised.
-2. **Prove the ownership guard rejects.** Signal a session about an issue in a
+3. **Prove the ownership guard rejects.** Signal a session about an issue in a
    repository it is not bound to. It must reply `not-mine` and read nothing. A guard
    only ever seen to accept is not evidence.
-3. **Prove one round trip.** File an issue in the bundles repository from the bundles
+4. **Prove one round trip.** File an issue in the bundles repository from the bundles
    session, signal the authoring session, and confirm a `kind=question` comment with
    a correct header appears on the downstream issue and that the bundles session is
    signalled back.
-4. **Prove silence.** Confirm that a session which writes a comment needing no answer
+5. **Prove silence.** Confirm that a session which writes a comment needing no answer
    sends no signal, and that a session with no inbound signal does nothing at all.
-5. **Prove a stuck exit.** Drive a thread to the cap and confirm the stalemate
+6. **Prove a stuck exit.** Drive a thread to the cap and confirm the stalemate
    comment, the label swap and the escalation all happen.
-6. **Prove the recovery check is cheap.** Measure what the manual check reads on a
+7. **Prove the recovery check is cheap.** Measure what the manual check reads on a
    repository with a realistic number of open issues. It must touch only the
    `relay:open` ones.
 
