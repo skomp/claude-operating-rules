@@ -69,7 +69,7 @@ installing the relay never drags in worktree rules, and the reverse.
 | Skill | Trigger |
 |---|---|
 | `coordinating-across-repos` | You find a cause that lives in another repository; you are about to edit a repository you are not bound to; you need to open, answer or close a cross-repo thread. Owns the preconditions, the wire format, the signalling rule and termination. |
-| `handling-an-inbound-ping` | A peer signals you **with a `relay:v1` envelope**, or the human asks whether there is anything to discuss. Owns the envelope discipline, the ownership guard, the decision rule and the subagent dispatch. It has no opinion on any other message. |
+| `handling-an-inbound-ping` | A peer signals you **with a `session-relay:v1` envelope**, or the human asks whether there is anything to discuss. Owns the envelope discipline, the ownership guard, the decision rule and the subagent dispatch. It has no opinion on any other message. |
 
 The wire format is defined once, in `coordinating-across-repos`, and referenced by
 the other. Two copies of one format is the failure `completing-a-correction`
@@ -99,10 +99,10 @@ at all.
 The signal itself:
 
 ```
-relay:v1 <kind> <owner>/<repo>#<number> blocking=yes|no
+session-relay:v1 <kind> <owner>/<repo>#<number> blocking=yes|no
 ```
 
-The leading `relay:v1` is the **envelope**. It is the only thing that makes a message
+The leading `session-relay:v1` is the **envelope**. It is the only thing that makes a message
 this protocol's, and it carries the version so a receiver can tell a message it does
 not understand from a message it must ignore. `kind` is the vocabulary the comments
 use. The sender sets `blocking=yes` only when
@@ -122,7 +122,7 @@ rather than to be correct.
    `alpha-8c` and `alpha-run` cannot be told apart from outside.
 3. The receiver decides. **Once a message is known to be this protocol's**, the
    first thing it checks is whether the issue's repository is the repository this
-   session is bound to. If it is not, reply `relay:v1 not-mine <ref>` and stop.
+   session is bound to. If it is not, reply `session-relay:v1 not-mine <ref>` and stop.
    Nothing is read, nothing is written. What comes before this check is *Envelope
    discipline* below.
 4. If no candidate matches, or every candidate replies `not-mine`, the sender says
@@ -144,7 +144,7 @@ Every protocol comment opens with a machine-readable header and a visible
 attribution line:
 
 ```markdown
-<!-- relay:v1 from=bundles repo=owner/repo-b ref=2eac95 kind=question seq=3 blocking=yes -->
+<!-- session-relay:v1 from=bundles repo=owner/repo-b ref=2eac95 kind=question seq=3 blocking=yes -->
 **`bundles` → `authoring`** · question · 3 of 10
 ```
 
@@ -178,8 +178,8 @@ Two labels, and they exist for one purpose: to make the human's manual check che
 
 | Label | Meaning | Lifecycle |
 |---|---|---|
-| `relay:open` | A cross-repo thread is live on this issue | added with the first protocol comment, removed at conclusion |
-| `relay:stalled` | The thread hit the cap or a loop and is waiting on the human | added at a stuck exit |
+| `session-relay:open` | A cross-repo thread is live on this issue | added with the first protocol comment, removed at conclusion |
+| `session-relay:stalled` | The thread hit the cap or a loop and is waiting on the human | added at a stuck exit |
 
 Issues Claude files also carry `created-by-claude`, per `tracking-work`. Labels are
 created on first use with `gh label create`.
@@ -188,10 +188,10 @@ created on first use with `gh label create`.
 
 A signal reaches only a running session. When one is missed, recovery is the human
 asking — "are there new issues to discuss?" — and the answer must be cheap to
-produce. That is what `relay:open` is for:
+produce. That is what `session-relay:open` is for:
 
 ```sh
-gh issue list --state open --label relay:open --json number,title,updatedAt
+gh issue list --state open --label session-relay:open --json number,title,updatedAt
 ```
 
 Read only the newest protocol comment of each result. **Do not read every open issue
@@ -205,11 +205,21 @@ receives messages for many reasons, and other skills — present or future — d
 their own. This protocol owns exactly one shape and must be inert for everything
 else.
 
+**The prefix names the protocol, not the skill and not the message type.** It is
+`session-relay:` because that is the name of the protocol and of the plugin, and
+because both of the obvious alternatives are worse. A prefix carrying the receiving
+skill's name would make the sender depend on the receiver's implementation: rename
+the skill and every header already posted into a GitHub issue is retroactively
+wrong, and those comments are permanent. A prefix carrying the message type
+(`triage:`, `question:`) would claim four generic English words for one protocol. A
+wire format must outlive the code that reads it, so it names the only thing that
+does not move.
+
 **The prefix is both the trigger and the guard, and they are different
 mechanisms.** The guard below runs inside a skill that is already in context. What
 puts it there is its frontmatter `description`, which is the only retrieval
 mechanism a skill has. So the description of `handling-an-inbound-ping` must name
-the literal string `relay:` and must say that the skill is inert for anything else.
+the literal string `session-relay:` and must say that the skill is inert for anything else.
 A description that says "handles messages from peer sessions" routes every protocol
 to this one skill and makes the guard the only thing standing between them.
 
@@ -220,18 +230,18 @@ it is a verification item below, not an assumption.
 
 The guards run in this order, and the order is the point:
 
-1. **Does the message begin with `relay:`?** If not, it is not this protocol's.
+1. **Does the message begin with `session-relay:`?** If not, it is not this protocol's.
    Ignore it completely: do not act, do not reply, do not report it as unrecognised,
    do not mark it handled. Hand it back to the session's normal handling, which may
    include another skill. **A reply is a form of consumption** — answering
    `not-mine` to a message that was never a relay message claims it.
-2. **Is the version supported?** `relay:v1` is understood. A higher version means the
+2. **Is the version supported?** `session-relay:v1` is understood. A higher version means the
    sender knows something this receiver does not. Reply
-   `relay:v1 unsupported version=<v> <ref>` and tell the human. Do not guess at the
+   `session-relay:v1 unsupported version=<v> <ref>` and tell the human. Do not guess at the
    semantics of a version you do not implement.
 3. **Is the repository mine?** The ownership guard, *Addressing* step 3.
 4. **Is the `kind` one of the five?** If not, reply
-   `relay:v1 unsupported kind=<kind> <ref>` and tell the human. An unknown `kind`
+   `session-relay:v1 unsupported kind=<kind> <ref>` and tell the human. An unknown `kind`
    inside a known version is a protocol error, not a message to improvise on.
 
 Only a message that passes all four reaches the decision rule below. Guards 2 and 4
@@ -270,7 +280,7 @@ The subagent's constraints, which go in its dispatch verbatim:
 Three exits.
 
 **Conclusion.** A `kind=conclusion` comment on the downstream issue stating what was
-decided and why, cross-linked into the upstream issue, `relay:open` removed. Each
+decided and why, cross-linked into the upstream issue, `session-relay:open` removed. Each
 session closes only its own repository's issue, and only when the fix lands.
 
 **Cap.** Ten comments carrying your own `from=` on that issue. Count by reading the
@@ -284,7 +294,7 @@ Both stuck exits do the same thing:
 
 1. Post one `kind=stalemate` comment: what is settled, what is still open, what each
    side believes.
-2. Replace `relay:open` with `relay:stalled`.
+2. Replace `session-relay:open` with `session-relay:stalled`.
 3. Signal the peer that the thread is closed, so a peer mid-compose does not post an
    eleventh comment.
 4. Raise the specific decision with the human **in the session that owns the work**.
@@ -309,13 +319,13 @@ The other six skills in this repository are untested, and the README says so. Th
 one is testable before it ships, and the live tutorial-tooling fleet is the rig.
 
 1. **Prove the description fires on the prefix alone.** Send a session a bare
-   `relay:v1 triage <owner>/<repo>#1 blocking=no` and nothing else — no surrounding
+   `session-relay:v1 triage <owner>/<repo>#1 blocking=no` and nothing else — no surrounding
    explanation, no mention of issues or peers. The skill must load. If it does not,
    the prefix does not route, and a central dispatcher becomes necessary rather than
    optional. Record the result in `router-repo#1`, which is waiting
    on exactly this answer.
 2. **Prove the skill ignores what is not its own.** Send a session an ordinary
-   message with no `relay:` prefix while the skill is loaded. It must do nothing at
+   message with no `session-relay:` prefix while the skill is loaded. It must do nothing at
    all — no reply, no `not-mine`, no mention that it saw a protocol message. This is
    the guard most likely to be written and never exercised.
 3. **Prove the ownership guard rejects.** Signal a session about an issue in a
@@ -331,7 +341,7 @@ one is testable before it ships, and the live tutorial-tooling fleet is the rig.
    comment, the label swap and the escalation all happen.
 7. **Prove the recovery check is cheap.** Measure what the manual check reads on a
    repository with a realistic number of open issues. It must touch only the
-   `relay:open` ones.
+   `session-relay:open` ones.
 
 The README's "untested" caveat must then be narrowed to the six skills it still
 applies to, not copied onto the seventh.
