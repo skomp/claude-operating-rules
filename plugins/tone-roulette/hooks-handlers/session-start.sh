@@ -147,6 +147,42 @@ main() {
     fi
   fi
 
+  # --- Prune stale per-session state files (issue #6). Every session that
+  #     loads this plugin leaves one ~20-byte file behind forever, because
+  #     session ids are UUIDs the handler can never see again to know a
+  #     session ended. Age is the only available signal, so this removes
+  #     files whose mtime is older than 30 days — chosen generously because
+  #     resume/clear/compact (below, and see the resume branch above) only
+  #     READ the state file without rewriting it, so a long-running
+  #     session's file keeps its original mtime the whole time and must not
+  #     look stale just because the session has been open for a while.
+  #
+  #     Runs only on `startup`, and only after this run's own state_file has
+  #     just been persisted above, so it always has a name to protect.
+  #     `resume`/`clear`/`compact` never reach here: they are reading state
+  #     for a possibly-still-live session, and a prune racing that read is
+  #     how a live session loses its tone. Every safety property is
+  #     enforced by the find invocation itself, not by trusting its inputs:
+  #       - refuses to run at all unless state_dir is a real directory
+  #         (empty/unset/non-directory all skip the block below);
+  #       - "-maxdepth 1 -type f" never descends and never follows a
+  #         symlink (a symlink's find type is its own, not its target's, so
+  #         a symlink inside state_dir pointing outside it is never a match
+  #         and is never touched);
+  #       - "! -name" excludes this session's own file by exact name,
+  #         regardless of age;
+  #       - "-exec rm -f {} +" (not the non-POSIX "-delete") only ever fires
+  #         on paths find itself produced, which are already confined to
+  #         state_dir by -maxdepth 1.
+  #     Any failure here (permission denied, race with another process,
+  #     etc.) is swallowed by the redirect below: this must never be the
+  #     reason a session-start hook prints to stderr or exits non-zero.
+  if [ "$source_val" = "startup" ] && [ -n "${state_dir:-}" ] && [ -d "$state_dir" ] && [ -n "$state_file" ]; then
+    {
+      find "$state_dir" -maxdepth 1 -type f -mtime +30 ! -name "$(basename "$state_file")" -exec rm -f {} +
+    } 2>/dev/null
+  fi
+
   tone_file="$styles_dir/$selected.md"
   [ -r "$tone_file" ] || return 0
 

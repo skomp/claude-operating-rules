@@ -90,6 +90,19 @@ state_file_for() {
   printf '%s/.claude/tone-roulette/%s' "$home" "$sid"
 }
 
+# days_ago_ts N -> a timestamp N days in the past, formatted for `touch -t`
+# ([[CC]YY]MMDDhhmm). Tries BSD date's `-v` first (macOS); falls back to
+# GNU date's `-d` (Linux). Used to age fixtures without depending on
+# `find -mtime`'s own BSD/GNU differences to also be the thing under test.
+days_ago_ts() {
+  local days="$1"
+  if date -v-1d +%Y%m%d%H%M >/dev/null 2>&1; then
+    date -v-"${days}"d +%Y%m%d%H%M
+  else
+    date -d "${days} days ago" +%Y%m%d%H%M
+  fi
+}
+
 # =====================================================================
 # Test 1 — output is valid JSON for a roll.
 # =====================================================================
@@ -594,6 +607,208 @@ state_file_for() {
     pass "test13: the sanitised session_id's state file landed inside $state_dir"
   else
     fail "test13: expected a state file inside $state_dir, found $written_count candidate(s), inside=$wrote_inside"
+  fi
+}
+
+# =====================================================================
+# Test 14 — issue #6: prune by mtime on startup. A state file older than
+# the 30-day threshold is gone by the time a fresh `startup` run finishes.
+# =====================================================================
+{
+  home="$(new_tmp_dir)"
+  state_dir="$home/.claude/tone-roulette"
+  mkdir -p "$state_dir"
+
+  stale_file="$state_dir/stale-old-session"
+  printf '%s\n' "${TONES[0]}" > "$stale_file"
+  touch -t "$(days_ago_ts 40)" "$stale_file"
+
+  cur_sid="$(next_session_id)"
+  run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$cur_sid\",\"source\":\"startup\"}" >/dev/null
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && [ ! -e "$stale_file" ]; then
+    pass "test14: a 40-day-old state file is removed by a startup run"
+  else
+    fail "test14: expected $stale_file removed by a startup run (exit=$ec)"
+  fi
+}
+
+# =====================================================================
+# Test 15 — a recent state file (1 day old) is kept.
+# =====================================================================
+{
+  home="$(new_tmp_dir)"
+  state_dir="$home/.claude/tone-roulette"
+  mkdir -p "$state_dir"
+
+  recent_file="$state_dir/recent-session"
+  printf '%s\n' "${TONES[0]}" > "$recent_file"
+  touch -t "$(days_ago_ts 1)" "$recent_file"
+
+  cur_sid="$(next_session_id)"
+  run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$cur_sid\",\"source\":\"startup\"}" >/dev/null
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && [ -e "$recent_file" ]; then
+    pass "test15: a 1-day-old state file is kept by a startup run"
+  else
+    fail "test15: expected $recent_file to survive a startup run (exit=$ec)"
+  fi
+}
+
+# =====================================================================
+# Test 16 — the current session's own file is kept even when its mtime
+# was 40 days old before this run (design decision #3: never removed,
+# regardless of age).
+# =====================================================================
+{
+  home="$(new_tmp_dir)"
+  state_dir="$home/.claude/tone-roulette"
+  mkdir -p "$state_dir"
+
+  cur_sid="$(next_session_id)"
+  cur_file="$state_dir/$cur_sid"
+  printf '%s\n' "${TONES[0]}" > "$cur_file"
+  touch -t "$(days_ago_ts 40)" "$cur_file"
+
+  run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$cur_sid\",\"source\":\"startup\"}" >/dev/null
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && [ -e "$cur_file" ]; then
+    pass "test16: the current session's own state file survives a startup run even though its prior mtime was 40 days old"
+  else
+    fail "test16: expected $cur_file (current session) to survive (exit=$ec)"
+  fi
+}
+
+# =====================================================================
+# Test 17 — resume, clear and compact never prune: an unrelated 40-day-old
+# state file is left alone on each of those sources (prune runs only on
+# startup, per design decision #2).
+# =====================================================================
+{
+  for src in resume clear compact; do
+    home="$(new_tmp_dir)"
+    state_dir="$home/.claude/tone-roulette"
+    mkdir -p "$state_dir"
+
+    other_file="$state_dir/other-old-session-$src"
+    printf '%s\n' "${TONES[0]}" > "$other_file"
+    touch -t "$(days_ago_ts 40)" "$other_file"
+
+    cur_sid="$(next_session_id)"
+    cur_file="$state_dir/$cur_sid"
+    printf '%s\n' "${TONES[0]}" > "$cur_file"
+
+    run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$cur_sid\",\"source\":\"$src\"}" >/dev/null
+    ec=$?
+
+    check
+    if [ "$ec" -eq 0 ] && [ -e "$other_file" ]; then
+      pass "test17: source=$src does not prune a 40-day-old unrelated state file"
+    else
+      fail "test17: source=$src removed $other_file (exit=$ec) — prune must not run outside startup"
+    fi
+  done
+}
+
+# =====================================================================
+# Test 18 — nothing outside the state directory is touched: a plain old
+# file directly in $HOME, and a symlink inside the state directory
+# pointing at a file outside it, both survive a startup run that prunes.
+# This is the assertion that matters most.
+# =====================================================================
+{
+  home="$(new_tmp_dir)"
+  state_dir="$home/.claude/tone-roulette"
+  mkdir -p "$state_dir"
+
+  outside_file="$home/outside-plain-file"
+  printf 'do not touch\n' > "$outside_file"
+  touch -t "$(days_ago_ts 40)" "$outside_file"
+
+  outside_target="$home/outside-symlink-target"
+  printf 'do not touch either\n' > "$outside_target"
+  touch -t "$(days_ago_ts 40)" "$outside_target"
+
+  link_in_state="$state_dir/escape-link"
+  ln -s "$outside_target" "$link_in_state"
+  touch -h -t "$(days_ago_ts 40)" "$link_in_state" 2>/dev/null
+
+  cur_sid="$(next_session_id)"
+  run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$cur_sid\",\"source\":\"startup\"}" >/dev/null
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && [ -e "$outside_file" ]; then
+    pass "test18: a plain old file directly in \$HOME (outside the state dir) survives a startup run"
+  else
+    fail "test18: $outside_file was removed by a startup run (exit=$ec) — prune escaped the state directory"
+  fi
+
+  check
+  if [ -e "$outside_target" ]; then
+    pass "test18: the file a symlink inside the state dir points at survives a startup run"
+  else
+    fail "test18: $outside_target was removed by a startup run — a symlink in the state dir was followed"
+  fi
+}
+
+# =====================================================================
+# Test 19 — exit code 0 and valid JSON output are unaffected when a stale
+# file is present and gets pruned.
+# =====================================================================
+{
+  home="$(new_tmp_dir)"
+  state_dir="$home/.claude/tone-roulette"
+  mkdir -p "$state_dir"
+
+  stale_file="$state_dir/prune-json-check-old"
+  printf '%s\n' "${TONES[0]}" > "$stale_file"
+  touch -t "$(days_ago_ts 40)" "$stale_file"
+
+  cur_sid="$(next_session_id)"
+  out="$(run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$cur_sid\",\"source\":\"startup\"}")"
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && printf '%s' "$out" | jq . >/dev/null 2>&1; then
+    pass "test19: exit code 0 and valid JSON output are unaffected when a stale file gets pruned"
+  else
+    fail "test19: startup run with a stale file to prune gave exit=$ec, out='$out'"
+  fi
+}
+
+# =====================================================================
+# Test 20 — pruning a directory that contains only the current session's
+# file leaves it intact (nothing else exists there to remove, and the
+# current file itself is not removed).
+# =====================================================================
+{
+  home="$(new_tmp_dir)"
+  state_dir="$home/.claude/tone-roulette"
+  mkdir -p "$state_dir"
+
+  cur_sid="$(next_session_id)"
+  cur_file="$state_dir/$cur_sid"
+
+  run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$cur_sid\",\"source\":\"startup\"}" >/dev/null
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && [ -e "$cur_file" ]; then
+    entries="$(find "$state_dir" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "$entries" -eq 1 ]; then
+      pass "test20: a state directory containing only the current session's file is left intact (1 entry)"
+    else
+      fail "test20: expected exactly 1 entry in $state_dir after the run, found $entries"
+    fi
+  else
+    fail "test20: expected $cur_file to exist after the run (exit=$ec)"
   fi
 }
 

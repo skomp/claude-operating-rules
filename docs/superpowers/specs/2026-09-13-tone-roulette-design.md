@@ -104,6 +104,17 @@ State lives at `~/.claude/tone-roulette/<session_id>`, a single line holding the
 `session_id` comes from the hook's stdin JSON. If the state file is missing when `clear` or
 `compact` fires, the script rolls a fresh tone rather than failing.
 
+**Pruning stale state files (issue #6).** After a `startup` roll persists, the handler
+removes other files directly under the state directory whose mtime is older than 30 days,
+via `find <state_dir> -maxdepth 1 -type f -mtime +30 ! -name <this session's file> -exec rm
+-f {} +`. This runs only on `startup`, never on `resume`/`clear`/`compact` — those paths only
+read state for what may still be a live session, and a prune racing that read is how a live
+session loses its tone. The current session's own file is excluded by name and is never
+removed regardless of age. Age is the only available signal (session ids are UUIDs; the
+handler has no way to ask whether a session ended), and 30 days is generous specifically
+because `resume`/`clear`/`compact` never rewrite the state file, so a long-running session's
+file keeps its original `startup` mtime for as long as the session stays open.
+
 ## Tone file format
 
 ```markdown
@@ -149,6 +160,7 @@ a bug.
 | State file unreadable, or holds an unknown tone name | Roll fresh; do not fail |
 | State file holds the literal value `__off__` | On `resume`/`clear`/`compact`: emit nothing, exit 0, session stays untoned. On `startup`: ignore it and roll fresh, same as any other source |
 | `session_id` absent from stdin | Fall back to a single state file keyed by working directory |
+| Pruning the state directory fails (permission denied, race, etc.) | Swallowed (`2>/dev/null`); the session's own roll/announce/inject already completed and is unaffected |
 
 Every failure path exits 0. A hook belonging to a fun plugin must never degrade a session.
 
