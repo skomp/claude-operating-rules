@@ -55,3 +55,30 @@ Where STE and precision conflict, **precision wins**: identifiers, file paths, c
 This is about tickets. Chat replies, commit messages, code comments and design docs keep their normal voice.
 
 One rule reaches further, because it governs all prose including chat: **always qualify an issue or PR reference with the repo.** Never write a bare `#123`; write `PR: <repo>#<number>` for a pull request (`PR: repo-b#56`) and `repo#123` for an issue (`repo-a#81`). It applies to every ticket you write here too.
+
+### The qualification rule collides with GitHub's closing keywords
+
+A tutorial-authoring project, 2026-09-13. Three commits carried `Closes courseware-runner#24`,
+`Closes courseware-runner#26`, `Closes courseware-runner#27`, were pushed to the default
+branch, and **closed nothing**. All three issues were still open afterwards and had to be
+closed by hand.
+
+GitHub parses a closing keyword followed by `#123` (same repository) or by
+`owner/repo#123`. It does **not** parse `repo#123` — the short qualified form this skill
+asks for everywhere else. The reference renders as plain text, the issue stays open, and
+nothing reports a problem: the push succeeds, the commit looks right, and the board is
+silently wrong.
+
+So the two rules want different spellings, and both are correct in their place:
+
+| Where | Write | Why |
+|---|---|---|
+| prose, tickets, chat, plan documents | `repo-a#81`, `PR: repo-b#56` | a bare `#123` is unresolvable across repos |
+| a **closing keyword** in a commit message or PR body | `Closes owner/repo-a#24` | the only qualified form GitHub's parser acts on |
+
+The owner-qualified form satisfies both — it names the repository unambiguously *and* it
+closes. Use it whenever the reference is load-bearing for automation.
+
+**Do not trust the close to have happened.** After pushing a commit that claims to close
+something, check: `gh issue list --state open`. The failure is silent by construction, and
+an issue that a commit message says is closed is exactly the issue nobody looks at again.

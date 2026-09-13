@@ -52,3 +52,50 @@ Before labelling anything for an autonomous seat:
 - **A capability the agent lacks is not fixable by writing a better spec.** A revision was spent resolving genuine spec defects, and then re-dispatched into a wall that no spec could move. Ask "can it physically do this" before "have I explained this well enough".
 - **Split the issue at the boundary** rather than relaxing the guard. The guard was correct: a builder that can edit its own reviewer can weaken its own gate.
 - **An escalation that says "retry cap exhausted" describes the budget, not the cause.** Read what it was actually failing at before re-dispatching. The first report's failure text was test output; the second's was the refusal message in full, and that is where the answer was.
+
+## Rule 3 — A judgement you did not verify becomes a requirement the moment you write it down
+
+A tutorial-authoring project, 2026-09-13. Your human partner ruled that a project skeleton
+is toil, with an exception where the setup is itself the subject. You wrote the ruling into
+the rubric — the document auditors follow — and added an empirical sentence nobody had
+checked: *the objectives treat the skeleton as ground in every course in the catalogue*. It
+was false in four of five bundles. Their lesson-00 objective lists name the setup outright.
+
+It reached four dispatch prompts before it was caught. Two agents had already ruled using
+it, one quoting it back as its ground.
+
+The second draft was worse in a subtler way. A peer session sent four rulings with verbatim
+objective quotes; the quotes were right, the rulings were not. They went into the rubric as
+a **worked table** — a normative artefact, in the voice of the rubric — without enumerating
+anything. Two of four rows were wrong, in opposite directions. Only when agents listed
+*which elements serve which objective* did the real answer appear: the exception fires once
+in five, and the discriminator is that a conjunctive objective is almost never sole-served,
+because the setup serves one conjunct and later elements serve the others.
+
+- **An empirical claim inside a normative document is still an empirical claim.** "A skeleton
+  is toil" is a ruling and cannot be wrong. "Every course treats it as ground" is a
+  measurement wearing a ruling's clothes. Grep for it before you write it, or do not write it.
+- **Never publish another agent's judgements as your table.** Take their *quotes* — those
+  held perfectly, all four verbatim. Their *conclusions* were as unverified as your own. Peer
+  analysis is a lead, not a measurement.
+- **Enumerate rather than characterise.** Two competent readers judged the same four
+  objective lists from wording and got two rows wrong each, in opposite directions. Listing
+  elements settled it in one pass per bundle.
+- **When the authoritative document changes under live agents, message every one of them
+  immediately**, and say which way the answer moves for *their* case. Two of the four
+  finished on the old text; one had to be resumed and redone.
+- **Tell them to report a discrepancy rather than reconcile it.** Every dispatch said
+  re-add the numbers yourself and report rather than adjust an element to make the stated
+  total come out. That clause found two arithmetic defects that predated the ruling entirely
+  and had survived publication.
+- **Version the correction in place.** Each report now says what the rubric says today *and*
+  what the draft said. A reader who followed the old cross-reference can see what happened
+  instead of concluding the reports disagree.
+- **Name the file you read, not only the line.** Same session: `bundle-format.md:563` was
+  cited into a GitHub issue from the installed plugin copy (1802 lines). The repository
+  source is 1830 — an unreleased commit adds 28 — so the section is at `:584` there. Anyone
+  reading the issue with the repo open lands 21 lines off and concludes the quote was
+  invented. A peer caught it only because they happened to hold the other file; with one
+  citer and no second reader, nothing catches it. Whenever a document exists as an installed
+  copy, a vendored copy, a worktree and a release, **cite it by section name**, and say which
+  copy you read when a line number is unavoidable.
