@@ -98,7 +98,7 @@ main() {
     idx=$((RANDOM % count))
     selected="${tones[$idx]}"
     if [ -n "$state_file" ]; then
-      printf '%s\n' "$selected" > "$state_file" 2>/dev/null
+      { printf '%s\n' "$selected" > "$state_file"; } 2>/dev/null
     fi
   fi
 
@@ -122,8 +122,19 @@ main() {
   )"
   body="${body%X}"
 
-  # --- JSON-escape the body: backslashes, then quotes, then real newlines
-  #     as literal \n. Shell text processing only, per Global Constraint 3. ---
+  # --- JSON-escape the body, in an order where each pass only ever
+  #     introduces backslashes that later passes must NOT re-escape:
+  #       1. existing backslashes: \ -> \\
+  #       2. existing double quotes: " -> \"
+  #       3. C0 control characters other than \n (which pass 4 handles):
+  #          \t and \r get their short forms, everything else in
+  #          U+0000-U+001F becomes \u00XX. (U+0000 itself cannot occur here
+  #          in practice: bash command substitution truncates a captured
+  #          string at the first NUL byte, so there is nothing left by this
+  #          point for the loop below to ever match against 0 — the case is
+  #          included anyway so the escaping is complete on its own terms.)
+  #       4. real newlines -> literal \n
+  #     Shell text processing only, per Global Constraint 3. ---
   escaped_body="$(
     {
       printf '%s' "$body" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
@@ -131,6 +142,36 @@ main() {
     }
   )"
   escaped_body="${escaped_body%X}"
+
+  escaped_body="$(
+    {
+      printf '%s' "$escaped_body" | awk '
+        BEGIN {
+          for (c = 0; c <= 31; c++) {
+            if (c == 10) continue  # real newline: pass 4 handles it
+            ch = sprintf("%c", c)
+            if (c == 9)       esc = "\\t"
+            else if (c == 13) esc = "\\r"
+            else              esc = sprintf("\\u%04x", c)
+            ctrl_map[ch] = esc
+          }
+        }
+        {
+          line = $0
+          out = ""
+          n = length(line)
+          for (i = 1; i <= n; i++) {
+            ch = substr(line, i, 1)
+            out = out ((ch in ctrl_map) ? ctrl_map[ch] : ch)
+          }
+          print out
+        }
+      '
+      printf 'X'
+    }
+  )"
+  escaped_body="${escaped_body%X}"
+
   escaped_body="$(
     {
       printf '%s' "$escaped_body" | awk '{printf "%s\\n", $0}'
