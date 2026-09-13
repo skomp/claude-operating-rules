@@ -1,20 +1,23 @@
 # claude-operating-rules
 
-Three Claude Code plugins holding rules that were learned the expensive way — each one
-traceable to a specific failure, with the measurement that exposed it kept intact.
+Four Claude Code plugins. Three hold rules that were learned the expensive way — each one
+traceable to a specific failure, with the measurement that exposed it kept intact. The
+fourth, `tone-roulette`, is a demonstration rather than a rule; see its row in the table
+below for what that means.
 
 Nothing here is advice in the abstract. Every rule exists because something broke: a
 security check that passed because its needle was empty, an agent that reverted a human's
 work because it could not account for it, fourteen defects that all came from code written
 into a plan document, a session that grew too large to reopen.
 
-## The three plugins
+## The four plugins
 
 | Plugin | Skills | Install it if |
 |---|---|---|
 | **evidence-discipline** | `verifying-claims`, `completing-a-correction` | Always. Nothing in it is specific to Claude Code — it is "prove the check can fail before you trust that it passed", and "a fix is not done until every copy of the claim is fixed" |
 | **agent-operations** | `parallel-sessions`, `writing-plans-and-dispatches`, `recovering-a-session` | You dispatch subagents or run git worktrees. Useless if you work alone in one session |
 | **ticket-craft** | `tracking-work` | You want ASD-STE100 Simplified Technical English enforced on every ticket. Deliberately packaged alone, so wanting the verification rules never drags this in |
+| **tone-roulette** | `tone` | You want a demonstration of what a plugin can do beyond skills — output styles, a `SessionStart` hook, a shell handler — rather than another rule. It is a joke, not a lesson: it rolls a random conversational tone at session start and holds it for the session. Skip it if you only want the operating rules |
 
 ## Install
 
@@ -23,7 +26,24 @@ into a plan document, a session that grew too large to reopen.
 /plugin install evidence-discipline
 /plugin install agent-operations
 /plugin install ticket-craft
+/plugin install tone-roulette
 ```
+
+## tone-roulette: known limitations
+
+- **Subagents do not inherit the tone.** Forks inherit the parent's system prompt; other
+  subagents run their own. Implementer and reviewer agents answer in the default voice.
+- **Disabling the plugin mid-session does not retract a tone already injected.** The text
+  is already in the conversation history. `/tone off` is the mid-session path; disabling
+  the plugin is the between-sessions path.
+- **Only `startup` rolls.** A resumed session re-injects the stored tone rather than
+  rolling a new one, so `--resume` keeps whatever tone was already in play.
+- **Tone adherence depends on the model.** Tested on Haiku and Sonnet: on Sonnet the tone
+  lands reliably. On Haiku it frequently does not — the hook still fires, a tone is still
+  rolled and written to the state file, but the model answers in the plain default voice
+  anyway. The mechanism is working in that case; the model is not following the injected
+  instruction. A Haiku user who sees no tone is looking at a model limitation, not a broken
+  plugin. Other models have not been tested.
 
 ## Two rules to put in your own CLAUDE.md
 
