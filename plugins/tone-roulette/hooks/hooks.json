@@ -1,9 +1,9 @@
 {
-  "description": "Rolls a random conversational tone on a fresh session (startup, clear or compact), holds it for the session, and injects it as additional context.",
+  "description": "Rolls a random conversational tone at startup, re-injects the held tone on resume, clear or compact, and never fires on fork.",
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|clear|compact",
+        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "command",
