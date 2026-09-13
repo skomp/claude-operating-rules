@@ -115,8 +115,9 @@ it checked.
 
 **Step 0 — probe, before writing the handler.** The stdin field carrying the matcher value is
 not yet measured. Determine its real name rather than guessing: inspect the hook
-documentation strings in the Claude Code binary at
-`/Users/robert/.local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe`
+documentation strings in the Claude Code binary, which on a local npm install sits at
+`<npm root>/@anthropic-ai/claude-code/bin/claude.exe` — resolve it with
+`readlink -f "$(command -v claude)"` rather than hardcoding a path
 (`strings -n 6 <binary> | grep -n 'SessionStart' | cut -c1-300`, and search near the
 `"session_id": "abc123"` example), and read any `SessionStart` handler shipped under
 `~/.claude/plugins/marketplaces/`. **Write what you find into your report**, including the
