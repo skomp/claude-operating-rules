@@ -22,6 +22,18 @@ before the file exists**:
 4. **Plant a near-miss violation, re-run, confirm the check catches it, revert.** A check
    only ever seen to pass is not evidence. This step is not optional.
 
+   **A planted fault must be checked for reachability, not just written.** Two in
+   this plan were not: one extended a literal where `grep -F` matches substrings, and
+   Task 3's description fault uses a greedy `sed` that rewrites only the LAST
+   `session-relay:` on the line — so a description carrying the literal twice would
+   survive the plant silently. Count occurrences before trusting a plant.
+
+   **Shorten a literal to break it; never extend it.** `grep -F` matches substrings, so
+   turning `session-relay:stalled` into `session-relay:stalledd` still matches and the
+   plant silently does nothing. Task 2's implementer proved this:
+   `printf 'session-relay:stalledd' | grep -cF 'session-relay:stalled'` prints `1`.
+   Use `session-relay:stalld`.
+
 Checks are inline `bash`. Do not add tooling to this repository; the spec's file list is
 closed.
 
@@ -43,14 +55,15 @@ evidence rather than implementing something you believe is incorrect."*
 Copied verbatim from the spec. Every task's requirements implicitly include these.
 
 - The envelope is `session-relay:v1`. The guard prefix is `session-relay:`.
-- The five `kind` values, and no others: `triage`, `question`, `answer`, `conclusion`, `stalemate`.
+- The five comment `kind` values: `triage`, `question`, `answer`, `conclusion`, `stalemate`. The five signal-only control replies: `whois`, `mine`, `not-mine`, `not-enabled`, `unsupported`.
+- **The protocol is opt-in per repository.** It runs only where that repository's `CLAUDE.md` carries a `## Session relay` declaration naming its peers. A session never *infers* enablement — least of all from being asked to file an issue against another repository — but it does **offer** it once when the section is absent, and enables on any clear yes. `Not enabled.` in that section means never offer again.
 - The two labels: `session-relay:open`, `session-relay:stalled`. Issues Claude files also carry `created-by-claude`.
 - The cap is ten comments carrying your own `from=`, counted **per issue**.
 - Guard order is fixed: (1) prefix, (2) version, (3) repository ownership, (4) `kind`. Guard 1 sends no reply; guards 2, 3 and 4 do.
 - Prose references an issue as `repo#123` and a pull request as `PR: repo#123`. **A closing keyword takes the full `owner/repo#123`** — GitHub's parser does not act on the short form.
 - Tickets this protocol writes use ASD-STE100 Simplified Technical English, per `tracking-work`.
 - No hooks, no polling, no watcher, no registry file, no slash command.
-- This protocol never requires `router-repo`.
+- This protocol never requires a separate private repository.
 
 ## Already measured — do not re-derive
 
@@ -101,6 +114,12 @@ for p in m['plugins']:
 p=json.load(open('plugins/session-relay/.claude-plugin/plugin.json'))
 assert set(p)=={'name','version','description','author','homepage','repository','license','keywords'}, set(p)
 assert p['name']=='session-relay' and p['version']==e['version']
+assert p['version']=='0.1.0', p['version']
+assert p['author']=={'name':'skomp','url':'https://github.com/skomp'}, p['author']
+assert p['license']=='MIT'
+assert p['homepage']==p['repository']=='https://github.com/skomp/claude-operating-rules'
+assert e['source']=='./plugins/session-relay' and e['category']=='development'
+assert p['description']!=e['description'], "the two descriptions serve different readers"
 print("PASS")
 PY
 }
@@ -127,7 +146,17 @@ import json; p='.claude-plugin/marketplace.json'; m=json.load(open(p))
 m['plugins'][-1]['source']='./plugins/does-not-exist'
 json.dump(m,open(p,'w'),indent=2)"
 check   # MUST fail on the isdir assertion
-git checkout .claude-plugin/marketplace.json
+```
+
+**Do not restore with `git checkout .claude-plugin/marketplace.json`.** At this point
+the entry is not committed yet, so `checkout` reverts to `HEAD` and discards the whole
+Step 2 edit rather than the planted fault. Copy the file aside before planting, and
+restore from that copy:
+
+```bash
+cp .claude-plugin/marketplace.json "${TMPDIR:-/tmp}/mk.json"   # BEFORE planting
+# ... plant, run check, confirm it fails ...
+cp "${TMPDIR:-/tmp}/mk.json" .claude-plugin/marketplace.json; rm "${TMPDIR:-/tmp}/mk.json"
 check   # MUST pass again
 ```
 
@@ -156,22 +185,41 @@ git commit -m "Add the session-relay plugin manifest"
 
 **PROPOSAL** for the description — attack it, retrieval is the untested property in this repository:
 
-> "Read before you act on a problem whose cause lives in a repository other than the one this session is bound to. Load when you are about to edit, commit or open a pull request in a repository you do not own; file an issue against another project's repository; ask another session a question about its code; or conclude a discussion that spans two repositories."
+> "Read when this repository has opted in to the session-relay protocol — a `## Session relay` declaration in its `CLAUDE.md` — and you are about to raise work with a peer repository's session, answer one, or conclude a cross-repository thread. Also read it before editing, committing or opening a pull request in a repository this session is not bound to. Being asked to file an issue against another repository is NOT a trigger on its own."
+
+**The last sentence is load-bearing and was added deliberately.** An earlier draft
+triggered on "file an issue against another project's repository", which is an
+ordinary English request and would start the protocol unasked. If you rewrite this
+description, that exclusion survives the rewrite.
 
 **Contract — required sections, in this order:**
 
-1. **The two hard preconditions**, and the statement that the protocol refuses to operate and says so rather than degrading silently. Precondition 1 binds the session to one repository via `git remote get-url origin`; precondition 2 requires GitHub issues.
+1. **The three hard preconditions**, and the statement that the protocol refuses to operate and says so rather than degrading silently. Precondition 1 binds the session to one repository via `git remote get-url origin`; precondition 2 requires GitHub issues; **precondition 3 requires a human's written opt-in** — a `## Session relay` declaration in that repository's `CLAUDE.md` naming the peer repositories. Show the declaration's exact shape. State plainly that a session never enables the protocol and never infers enablement, and that a target repository absent from the declared list is not a peer. Then **Offering the protocol**: do the work you were asked to do first, then offer once, carrying the spec's proposed wording and both of its honest costs — the discussion is autonomous, and it is written into a public record. Any clear yes enables it and writes the declaration; a no writes `Not enabled.` so the offer never returns, with a note that deleting the section restores it. Offer only when the section is absent. Then **When a peer signals a repository that has not opted in**: reply `session-relay:v1 not-enabled <subject>` without reading anything — the signal alone carries the repository and the issue reference — and make the same offer to your own human partner, naming the calling session and the issue.
 2. **The teeth.** May read any peer repository. May never edit, commit, branch, tag or open a pull request in one. Work belonging elsewhere becomes an issue plus a signal. State *why*: without it the protocol is optional and a session that can fix the other repository will.
 3. **The signalling rule**, with the alternation table from the spec: a signal is emitted only immediately after this session writes to an issue, and only when that write needs something back.
 4. **The signal format** and the meaning of `blocking`, including that a sender marking everything blocking removes the receiver's ability to protect its own task.
 5. **The envelope**, with the reasoning for naming the protocol rather than the skill or the message type — a renamed skill would retroactively invalidate headers already permanent in GitHub comments.
-6. **Addressing.** How a sender turns a repository into a session name: `ListAgents`
-   gives the live names; the repository name is a *candidate* filter only, because
-   `alpha-8c` and `alpha-run` cannot be told apart from outside; the receiver's
-   ownership guard is what actually decides. If no candidate matches, or every
-   candidate replies `not-mine`, say so in your own chat — the issue is filed and
-   waits for a session on that repository. State why there is no registry: a
-   mis-addressed signal costs one round trip and changes nothing.
+6. **Addressing**, and **Two vocabularies**. Nothing reliably connects a repository
+   to a session name, so resolution is a question asked over the wire. `ListAgents`
+   lists live sessions; only interactive peers are reachable. The repository name
+   **orders** candidates and never excludes one — carry the spec's measurement
+   verbatim, because it is the evidence for the rule: of four real sessions, one
+   (`coursewear-run` against `courseWare-supplies`) matched under no string rule at all.
+   Then send `session-relay:v1 whois <owner>/<repo>`; the bound session replies
+   `mine`, others reply `not-mine`; on `not-mine`, ask every remaining live peer.
+   Only when nobody replies `mine` does the sender give up, and **giving up is a
+   report with fixing instructions**: what was filed and where, who was asked and what
+   each answered, who could not be asked (offline and Remote Control peers), and the
+   three alternative remedies — open a session in that repository and tell it to
+   triage the issue; check `git remote get-url origin` in a session that should have
+   answered, because an unbound session never answers `mine` however often it is
+   asked; or, when a session answered `not-enabled`, add the `## Session relay`
+   declaration to that repository's `CLAUDE.md`. Carry the spec's rule verbatim: **never report only that no session was
+   found.** State why there is no registry: the sessions **are** the registry, asked
+   rather than recorded, so the answer cannot go stale. Then give the two `kind` vocabularies —
+   the five comment kinds and the five control replies (`whois`, `mine`, `not-mine`,
+   `not-enabled`, `unsupported`) — and say that a control signal carries no issue
+   number.
 7. **The thread.** One venue, the downstream issue. The upstream issue gets exactly two protocol comments.
 8. **The comment format** — header and visible attribution line. This section is the single definition.
 9. **Labels**, the two plus `created-by-claude`, with `gh label create` shown.
@@ -193,7 +241,7 @@ check2() {
   head -1 "$f" | grep -qx -- '---' || { echo "no frontmatter"; return 1; }
   grep -qx 'name: coordinating-across-repos' "$f" || { echo "bad name"; return 1; }
   grep -q '^description: "' "$f" || { echo "description must be one quoted line"; return 1; }
-  for lit in 'ListAgents' 'session-relay:v1' 'triage' 'question' 'answer' 'conclusion' 'stalemate' \
+  for lit in 'ListAgents' 'whois' 'not-enabled' 'Session relay' 'session-relay:v1' 'triage' 'question' 'answer' 'conclusion' 'stalemate' \
              'session-relay:open' 'session-relay:stalled' 'created-by-claude' \
              'git remote get-url origin' 'gh label create' \
              'tracking-work' 'parallel-sessions' 'handling-an-inbound-ping'; do
@@ -220,7 +268,7 @@ Run `check2`. Expected: `PASS`.
 ```bash
 f=plugins/session-relay/skills/coordinating-across-repos/SKILL.md
 cp "$f" "${TMPDIR:-/tmp}/sr-backup.md"
-sed -i '' 's/session-relay:stalled/session-relay:stalledd/' "$f"
+sed -i '' 's/session-relay:stalled/session-relay:stalld/g' "$f"
 check2   # MUST fail with MISSING LITERAL: session-relay:stalled
 printf '\nx relay:v1 planted\n' >> "$f"
 check2   # MUST fail on the unnamespaced prefix
@@ -257,7 +305,7 @@ git commit -m "Add the coordinating-across-repos skill"
 
 **Contract — required sections, in this order:**
 
-1. **Envelope discipline**, before anything else, with the four guards in the fixed order and the reasoning that **a reply is a form of consumption**: answering `not-mine` to a message that was never a relay message claims it. Guard 1 sends no reply of any kind. Guards 2 and 4 reply because the message *was* addressed to this protocol and silence would strand the sender.
+1. **Envelope discipline**, before anything else, with the four guards in the fixed order and the reasoning that **a reply is a form of consumption**: guard 4 accepts BOTH `kind` vocabularies — the five comment kinds and the five control replies — because a guard that rejected `whois` would make addressing impossible, since the message that finds the right session would be refused by every session. Answering a `whois` for a repository this session is not bound to is `not-mine` under guard 3; answering one for the repository it IS bound to is `session-relay:v1 mine <owner>/<repo>`. It is: answering `not-mine` to a message that was never a relay message claims it. Guard 1 sends no reply of any kind. Guards 2 and 4 reply because the message *was* addressed to this protocol and silence would strand the sender.
 2. **The decision rule** — the blocking/overlap tree. State the reason a subagent is wrong for an overlapping task: it would read a tree moving under it, the same reason `parallel-sessions` makes a reviewer pin a commit.
 3. **The subagent dispatch boilerplate**, as a blockquote to be pasted verbatim, carrying: owns no files; reads and runs `gh` only; never edits, stages or commits; signs with the session's name and ref, not its own; returns to the session rather than asking the human; emits an outbound signal only if it wrote a comment needing an answer.
 4. **Manual recovery** — the `gh issue list --state open --label session-relay:open` command, and the instruction to read only the newest protocol comment of each result. State the reason: a recovery check that costs a large fraction of the context window is worse than the missed signal it repairs.
@@ -276,6 +324,7 @@ check3() {
   grep -qx 'name: handling-an-inbound-ping' "$f" || { echo "bad name"; return 1; }
   grep -q '^description: ".*session-relay:.*"$' "$f" || { echo "description must contain the literal session-relay:"; return 1; }
   for lit in 'session-relay:v1 not-mine' 'session-relay:v1 unsupported' 'session-relay:open' \
+             'whois' 'session-relay:v1 mine' 'session-relay:v1 not-enabled' \
              'parallel-sessions' 'coordinating-across-repos'; do
     grep -qF -- "$lit" "$f" || { echo "MISSING LITERAL: $lit"; return 1; }
   done
@@ -332,7 +381,7 @@ git commit -m "Add the handling-an-inbound-ping skill"
 - Consumes: the plugin name and both skill names from Tasks 1–3.
 - Produces: nothing later tasks depend on.
 
-**Contract — the table row.** A fourth row matching the existing three: bold plugin name, both skill names in backticks, and an "install it if" clause that says who should NOT install it as well as who should. The other three rows each do this.
+**Contract — the table row.** A fifth row matching the existing four: bold plugin name, both skill names in backticks, and an "install it if" clause that says who should NOT install it as well as who should. The other three rows each do this.
 
 **Contract — the "Known limitation" section.** It currently claims *these skills* are untested and are faithful records of failures that already happened. Both halves are now wrong for the seventh and eighth skills, in different ways, and the section must say so rather than quietly widening:
 
@@ -347,7 +396,7 @@ git commit -m "Add the handling-an-inbound-ping skill"
 check4() {
   test -f handoff.md && { echo "handoff.md still present"; return 1; }
   n=$(grep -c '^| ' README.md)
-  test "$n" -eq 5 || { echo "expected 5 table lines (header+sep+4 rows), got $n"; return 1; }
+  test "$n" -eq 6 || { echo "expected 6 (header + 5 rows; the |---| separator does not match '^| '), got $n"; return 1; }
   grep -q 'session-relay' README.md || { echo "no README row"; return 1; }
   grep -qF 'coordinating-across-repos' README.md || { echo "skill not named"; return 1; }
   grep -qF 'handling-an-inbound-ping' README.md || { echo "skill not named"; return 1; }
@@ -443,6 +492,7 @@ sed -i '' 's/^name: handling-an-inbound-ping$/name: handling-an-inbound-pong/' p
 sweep   # MUST fail on the name mismatch
 cp "${TMPDIR:-/tmp}/sr5.md" plugins/session-relay/skills/handling-an-inbound-ping/SKILL.md
 rm "${TMPDIR:-/tmp}/sr5.md"
+```
 
 Then plant an unresolvable cross-reference and confirm the third check catches it:
 
@@ -489,9 +539,9 @@ git commit -m "Record the mechanical verification of session-relay"
 
 **Interfaces:**
 - Consumes: Task 5's evidence file.
-- Produces: the answer that `router-repo#1` is waiting on.
+- Produces: the answer that the router repository's first issue is waiting on.
 
-**This task is gated on the human.** It needs the live fleet and a real repository to file into. Do not simulate it, do not mark items passed by reasoning about them, and do not narrow the README caveat without recorded output. If the fleet is unavailable, stop and report which items remain unrun.
+**This task is gated on the human.** It needs the live courseware fleet and a real repository to file into. Do not simulate it, do not mark items passed by reasoning about them, and do not narrow the README caveat without recorded output. If the fleet is unavailable, stop and report which items remain unrun.
 
 The seven items are in the spec's **Verification** section. Run them in order; item 1 is the one another repository depends on.
 
@@ -513,11 +563,18 @@ Record each item's actual output. A failed item is a finding, not a blocker to h
 
 - [ ] **Step 5: Report item 1's result to the router repository**
 
-Comment on `router-repo#1` with the outcome. That issue states both branches already: the skill loads, so each protocol routes itself and a router is needed only for an unclaimed envelope; or it does not, and a central router becomes necessary.
+Comment on the router repository's first issue with the outcome. That issue states both branches already: the skill loads, so each protocol routes itself and a router is needed only for an unclaimed envelope; or it does not, and a central router becomes necessary.
 
 - [ ] **Step 6: Narrow the README caveat to what was measured**
 
 Only now. Name which items passed, on which date, against which repositories. The six older skills stay uncaveated-down: nothing in this task measured them.
+
+**This step deliberately breaks `check4`.** `check4` refuses any sentence claiming
+`session-relay` is tested, which is correct for Tasks 1–5 and wrong once the evidence
+exists. Amend that one assertion in the same commit, so the guard becomes "the claim
+must name the date and the items it rests on" rather than "the claim is forbidden".
+Do not simply delete it: a caveat with nothing guarding it drifts back to a bare
+"tested" within two edits.
 
 - [ ] **Step 7: Commit**
 
