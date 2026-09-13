@@ -25,10 +25,10 @@ permits. This plugin is that channel.
 The protocol refuses to operate unless both hold. A session that cannot satisfy
 them says so plainly and does not silently degrade.
 
-1. **One session, one repository.** The session binds to exactly one repository at
-   start, taken from `git remote get-url origin` in the working directory. If there
-   is no origin, or the origin is not GitHub, the session is *unbound* and takes no
-   part in the protocol.
+1. **One session, one repository.** The session binds to exactly one repository,
+   taken from `git remote get-url origin` in the working directory. If there is no
+   origin, or the origin is not GitHub, the session is *unbound* and takes no part
+   in the protocol.
 2. **Work is tracked in GitHub issues.** A project using `TODO.md` cannot
    participate — there is nothing for a peer to read or comment on.
 
@@ -37,118 +37,104 @@ them says so plainly and does not silently degrade.
 A session may clone and read any peer repository to understand a problem. A session
 **must never edit, commit, branch, tag or open a pull request in a repository it is
 not bound to.** Work that belongs to another repository becomes an issue filed
-against that repository, plus a ping.
+against that repository, plus a signal.
 
 Without this rule the protocol is optional: a session that can just fix the other
 repository will do so, and the coordination never happens.
 
 ## Non-goals
 
-- Coordinating sessions across machines. `SendMessage` reaches only sessions the
-  host lists. Cross-machine coordination degrades to polling, which is acceptable
-  because the issue, not the signal, is the durable record.
-- Replacing human review. The protocol escalates to the human; it does not decide.
-- Carrying discussion anywhere but GitHub. A session signal carries a reference and
-  routing flags. It never carries a question, an answer or an argument.
+- **Any background behaviour.** No hooks, no polling, no watcher, no registry file,
+  no slash command. A session acts under this protocol only when it writes to a peer
+  issue, when a peer signals it, or when the human asks it to look. Everything else
+  is silence.
+- **Noticing issues on its own.** A session does not scan open issues. An issue the
+  human files enters the protocol when the human says so in that session's chat,
+  which is that session's own input and needs no mechanism.
+- **Coordinating across machines.** `SendMessage` reaches only sessions the host
+  lists. Beyond that reach the protocol falls back to the human asking.
+- **Replacing human review.** The protocol escalates; it does not decide.
+- **Carrying discussion anywhere but GitHub.** A session signal carries a reference
+  and routing flags. It never carries a question, an answer or an argument.
 
 ## Architecture
 
 ### Packaging
 
-A new plugin `session-relay`, two skills. It is deliberately not part of
-`agent-operations`: that plugin is about many agents inside one repository, this is
-one agent per repository across many. Separating them means installing the relay
-never drags in worktree rules, and the reverse.
+A new plugin `session-relay`, two skills, no executable parts. It is deliberately
+not part of `agent-operations`: that plugin is about many agents inside one
+repository, this is one agent per repository across many. Separating them means
+installing the relay never drags in worktree rules, and the reverse.
 
 | Skill | Trigger |
 |---|---|
-| `coordinating-across-repos` | You find a cause that lives in another repository; you are about to edit a repository you are not bound to; you need to open, answer or close a cross-repo thread. Owns preconditions, addressing, the wire format and termination. |
-| `handling-an-inbound-ping` | A peer signals you, or a poll finds an issue you have not triaged. Owns the decision rule and the subagent dispatch. |
+| `coordinating-across-repos` | You find a cause that lives in another repository; you are about to edit a repository you are not bound to; you need to open, answer or close a cross-repo thread. Owns the preconditions, the wire format, the signalling rule and termination. |
+| `handling-an-inbound-ping` | A peer signals you, or the human asks whether there is anything to discuss. Owns the ownership guard, the decision rule and the subagent dispatch. |
 
 The wire format is defined once, in `coordinating-across-repos`, and referenced by
 the other. Two copies of one format is the failure `completing-a-correction`
 describes.
 
-### Identity and addressing
+### The signalling rule
 
-A session is identified by its host session name (`bundles`), its short ref
-(`2eac95`) and its bound repository (`owner/repo-b`). Names alone are not
-enough: in the observed fleet, `alpha-8c` and `alpha-run` cannot be told
-apart from outside, and a name is reused when a session restarts.
+**A signal is emitted only immediately after this session writes to an issue, and
+only when that write needs something back.** There is no other reason to signal, and
+no other way to be signalled.
 
-Each session writes one file at start:
+The consequence is strict alternation. Session `a` is bound to `ra`, session `b` to
+`rb`:
 
-```
-~/.claude/relay/sessions/<ref>.json
-{ "name": "bundles", "ref": "2eac95", "repo": "owner/repo-b",
-  "cwd": "/Users/robert/src/github.com/owner/repo-b",
-  "pid": 12345, "started": "2026-09-13T09:12:00Z" }
-```
+| Step | Session | Writes | Signals |
+|---|---|---|---|
+| 1 | `a` finds a cause that lives in `rb` | files `rb#7`, `kind=triage` | → `b` |
+| 2 | `b` reads `rb#7`, triages, asks | comment, `kind=question` | → `a`, because it asked |
+| 3 | `a` reads the question, answers | comment, `kind=answer` | → `b` |
+| … | alternating | | |
+| n | either side | `kind=conclusion` | → peer, so it stops waiting; no reply expected |
 
-One file per session, written to a temporary name and renamed, so concurrent
-sessions never write the same file. To ping a repository: read the directory,
-select the entry whose `repo` matches, confirm the name still appears in
-`ListAgents`, then `SendMessage`. Entries whose name is absent from `ListAgents`
-are stale and are deleted.
+A comment that needs nothing back produces no signal. A session never signals about
+an issue it has merely noticed. A session that has nothing to write does not signal
+at all.
 
-Addressing is **by repository, never by name**. A name that was eyeballed from a
-session list is a guess.
-
-### Discovery — two paths, different failure modes
-
-**Peer to peer.** `SendMessage` carrying a reference and routing flags:
+The signal itself:
 
 ```
 relay: <kind> <owner>/<repo>#<number> blocking=yes|no
 ```
 
-`kind` is the same vocabulary the comments use. The sender sets `blocking=yes` only
-when it cannot continue its own work without the answer — not merely because it
-would prefer one soon. A sender that marks everything blocking has removed the
-receiver's ability to protect its own task.
+`kind` is the vocabulary the comments use. The sender sets `blocking=yes` only when
+it cannot continue its own work without the answer — not because it would prefer one
+soon. A sender that marks everything blocking has removed the receiver's ability to
+protect its own task.
 
-The body of the discussion is never in the signal. The receiving session reads the
-issue.
+### Addressing
 
-**Human to a running session.** The human files an issue on GitHub. Nothing signals
-anyone, so discovery is a poll — and the poll must cost the human no ceremony, no
-label they have to remember. The poll asks two questions:
+Signals are addressed to a repository. Sessions are addressed by name. Resolving one
+to the other is the only genuinely unreliable step, so it is built to fail safely
+rather than to be correct.
 
-1. Which open issues in my repository carry neither `relay:triaged` nor
-   `relay:stalled`? Those are untriaged work.
-2. Which open issues carry `relay:awaiting-peer` where the newest protocol comment
-   is *not* from me? Those are answers that arrived while I was not listening.
+1. `ListAgents` gives the live session names.
+2. Session names generally derive from the working directory, so the repository name
+   is a usable candidate filter — but only a candidate. In the observed fleet
+   `alpha-8c` and `alpha-run` cannot be told apart from outside.
+3. The receiver decides. **The first step of handling any inbound signal is to
+   confirm the issue's repository is the repository this session is bound to.** If
+   it is not, reply `relay: not-mine <ref>` and stop. Nothing is read, nothing is
+   written.
+4. If no candidate matches, or every candidate replies `not-mine`, the sender says
+   so in its own chat: the issue is filed and waiting for a session on that
+   repository.
 
-The second question is what makes a missed signal harmless.
-
-**Both questions are bounded by a watermark.** A repository with forty open issues
-must not deliver forty pings the first time a session starts in it. The poll
-considers only issues created or updated after the timestamp in
-`~/.claude/relay/watermark-<owner>-<repo>.json`, which each poll advances. The first
-run in a repository writes the watermark, reports nothing, and says once that it has
-adopted the repository from this point forward. An existing backlog is ordinary work
-the human already knows about; it is not a set of pings.
-
-The poll runs from two hooks and one command:
-
-- `SessionStart` — registers the session and runs the poll once. Catches everything
-  filed while no session was running.
-- `Stop` — runs the poll when the session finishes a turn, debounced: skip if the
-  last poll was under 60 seconds ago, recorded in `~/.claude/relay/last-poll-<ref>`.
-  This is the part most likely to irritate, so it is separately switchable.
-- `/relay-inbox` — the same poll on demand.
-
-All three exit silently and successfully when `gh` is missing, the session is
-unbound, or the network fails. A hook that blocks a session is worse than a late
-ping.
+This is why no registry is needed. A mis-addressed signal costs one round trip and
+changes nothing, so a cheap wrong guess is better than state to maintain.
 
 ### The thread
 
 **One venue: the downstream issue.** When `bundles` files `authoring-tools#7`, that
 issue is the whole conversation. `authoring` asks its questions there, `bundles`
-answers there, the conclusion is recorded there. The upstream issue
-`bundles#41` gets exactly two protocol comments: one linking out, one carrying the
-conclusion back.
+answers there, the conclusion is recorded there. The upstream issue `bundles#41`
+gets exactly two protocol comments: one linking out, one carrying the conclusion
+back.
 
 Every protocol comment opens with a machine-readable header and a visible
 attribution line:
@@ -160,28 +146,45 @@ attribution line:
 
 The visible line is the provenance requirement: a reader sees which session spoke
 without reading HTML. The `ref` distinguishes two sessions that both called
-themselves `bundles` on different days. The `seq` is how ten is counted, and it counts **per issue**: the two comments on
-the upstream issue are a separate, and separately capped, thread from the discussion
-on the downstream one.
+themselves `bundles` on different days. The `seq` is how ten is counted, and it
+counts **per issue**: the two comments on the upstream issue are a separate, and
+separately capped, thread from the discussion on the downstream one.
 
 `kind` is one of `triage`, `question`, `answer`, `conclusion`, `stalemate`.
 
 Bodies follow `tracking-work`: ASD-STE100 Simplified Technical English, and every
-issue reference written `repo#123`, every pull request `PR: repo#123`. A bare
-`#123` in a cross-repo thread is unresolvable by construction.
+issue reference written `repo#123`, every pull request `PR: repo#123`. A bare `#123`
+in a cross-repo thread is unresolvable by construction.
 
 ### Labels
 
-| Label | Meaning | Applied by |
+Two labels, and they exist for one purpose: to make the human's manual check cheap.
+
+| Label | Meaning | Lifecycle |
 |---|---|---|
-| `relay:triaged` | A bound session has read this issue and decided what it needs, including deciding it needs no peer at all | the triaging session |
-| `relay:awaiting-peer` | This session has asked and is waiting | the asking session, which removes it when it reads the answer |
-| `relay:stalled` | The thread hit the cap or a loop | the session that hit it |
-| `created-by-claude` | Required on every issue Claude files | `tracking-work` |
+| `relay:open` | A cross-repo thread is live on this issue | added with the first protocol comment, removed at conclusion |
+| `relay:stalled` | The thread hit the cap or a loop and is waiting on the human | added at a stuck exit |
 
-Labels are created on first use with `gh label create`.
+Issues Claude files also carry `created-by-claude`, per `tracking-work`. Labels are
+created on first use with `gh label create`.
 
-### Inbound decision rule
+### Manual recovery
+
+A signal reaches only a running session. When one is missed, recovery is the human
+asking — "are there new issues to discuss?" — and the answer must be cheap to
+produce. That is what `relay:open` is for:
+
+```sh
+gh issue list --state open --label relay:open --json number,title,updatedAt
+```
+
+Read only the newest protocol comment of each result. **Do not read every open issue
+and every comment.** A recovery check that costs a large fraction of the context
+window is worse than the missed signal it repairs.
+
+### Handling an inbound signal
+
+After the ownership guard in *Addressing* step 3:
 
 ```
 blocking?  ──no──→  subagent handles it; the main session continues
@@ -201,19 +204,21 @@ The subagent's constraints, which go in its dispatch verbatim:
 
 - It owns no files. It reads, and it runs `gh`. It never edits, stages or commits.
 - It signs comments with the **session's** name and ref, not its own.
-- If it needs a decision from the human, it returns to the session and reports.
-  It never asks. A subagent asking the human is `parallel-sessions` §4 again.
+- If it needs a decision from the human, it returns to the session and reports. It
+  never asks. A subagent asking the human is `parallel-sessions` §4 again.
+- It emits the outbound signal itself only if it wrote a comment that needs an
+  answer, following the same rule as the session.
 
 ### Termination
 
 Three exits.
 
 **Conclusion.** A `kind=conclusion` comment on the downstream issue stating what was
-decided and why, cross-linked into the upstream issue. Each session closes only its
-own repository's issue, and only when the fix lands.
+decided and why, cross-linked into the upstream issue, `relay:open` removed. Each
+session closes only its own repository's issue, and only when the fix lands.
 
-**Cap.** Ten comments carrying your own `from=`. Count by reading the thread's
-protocol headers, not by memory.
+**Cap.** Ten comments carrying your own `from=` on that issue. Count by reading the
+thread's protocol headers, not by memory.
 
 **Loop.** A checkable test rather than a judgement: *before posting, compare the
 draft against your own earlier comments on this thread. If it asserts no new fact
@@ -223,7 +228,7 @@ Both stuck exits do the same thing:
 
 1. Post one `kind=stalemate` comment: what is settled, what is still open, what each
    side believes.
-2. Label the issue `relay:stalled`.
+2. Replace `relay:open` with `relay:stalled`.
 3. Signal the peer that the thread is closed, so a peer mid-compose does not post an
    eleventh comment.
 4. Raise the specific decision with the human **in the session that owns the work**.
@@ -238,10 +243,6 @@ plugins/session-relay/
   .claude-plugin/plugin.json
   skills/coordinating-across-repos/SKILL.md
   skills/handling-an-inbound-ping/SKILL.md
-  commands/relay-inbox.md
-  hooks/hooks.json
-  hooks/relay-register.sh
-  hooks/relay-poll.sh
 ```
 
 Plus an entry in `.claude-plugin/marketplace.json` and a fourth row in `README.md`.
@@ -251,33 +252,33 @@ Plus an entry in `.claude-plugin/marketplace.json` and a fourth row in `README.m
 The other six skills in this repository are untested, and the README says so. This
 one is testable before it ships, and the live tutorial-tooling fleet is the rig.
 
-1. **Prove the poll can fail.** Run it against a repository with no untriaged issue
-   and confirm it reports nothing. Plant one untriaged issue and confirm it is
-   found. A poll that has only ever been seen to report nothing is not evidence.
-2. **Prove the hooks fire.** Confirm `SessionStart` writes the registry file and
-   `Stop` runs the poll, by observing the side effects, not by reading the config.
-3. **End to end.** File a real issue against the bundles repository. Confirm the
-   bound session finds it, triages it, files against the authoring-tools repository
-   with a correct header, and that the authoring session answers on the downstream
-   issue.
+1. **Prove the ownership guard rejects.** Signal a session about an issue in a
+   repository it is not bound to. It must reply `not-mine` and read nothing. A guard
+   only ever seen to accept is not evidence.
+2. **Prove one round trip.** File an issue in the bundles repository from the bundles
+   session, signal the authoring session, and confirm a `kind=question` comment with
+   a correct header appears on the downstream issue and that the bundles session is
+   signalled back.
+3. **Prove silence.** Confirm that a session which writes a comment needing no answer
+   sends no signal, and that a session with no inbound signal does nothing at all.
 4. **Prove a stuck exit.** Drive a thread to the cap and confirm the stalemate
-   comment, the label and the escalation all happen.
+   comment, the label swap and the escalation all happen.
+5. **Prove the recovery check is cheap.** Measure what the manual check reads on a
+   repository with a realistic number of open issues. It must touch only the
+   `relay:open` ones.
 
 The README's "untested" caveat must then be narrowed to the six skills it still
 applies to, not copied onto the seventh.
 
 ## Risks
 
-- **Plugin hook schema.** `SessionStart` and `Stop` hooks in a plugin's
-  `hooks/hooks.json` are assumed to fire with `${CLAUDE_PLUGIN_ROOT}` available.
-  This is unverified. Prove it before building on it.
-- **`Stop` hook cost.** One `gh` call per turn boundary, debounced to 60 seconds.
-  If it proves irritating in use, the fallback is `SessionStart` plus `/relay-inbox`
-  only.
-- **`SendMessage` reach.** It reaches only sessions the host lists — in practice,
-  one machine. Cross-machine coordination falls back to polling. The issue label,
-  never the signal, is the durable truth.
-- **Registry staleness.** A session that exits without cleanup leaves a file behind.
-  `ListAgents` is the authority; the registry is only a repository index.
+- **Name resolution is a guess.** Mitigated by the receiver's ownership guard, which
+  makes a wrong guess cost one round trip. If guessing proves noisy in practice, a
+  registry can be added later; it is not needed to start.
+- **`SendMessage` reach.** It reaches only sessions the host lists — in practice, one
+  machine. Beyond that, recovery is the human asking. Accepted deliberately.
+- **A thread can sit unnoticed.** With no poller, a filed issue waits until a session
+  opens on that repository and the human asks. Accepted deliberately: the alternative
+  costs context on every session start.
 - **Two copies.** Per this repository's `CLAUDE.md`, a private copy of these skills
   lives in `~/.claude/skills/`. A correction here must be checked against it.
