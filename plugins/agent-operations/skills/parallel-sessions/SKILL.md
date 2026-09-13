@@ -235,6 +235,111 @@ The tell, before you send: the message contains something the peer is to do, or 
 or send back — "until", "once you", "let's agree", a word one of you is to reply with.
 A fact about yourself needs none of those.
 
+## 4a. One session owns one repository — hand work over, and say that you did
+
+*Recorded from a concurrent session, 2026-09-13. Not yet reviewed by the session that lived it.*
+
+Told on 2026-09-13, in the session owning `skomp/courseware-bundles`: *"this session
+handles the skomp/courseware-bundles repository and hands over the issue of failing
+validation to the repository it has to be fixed in. then, when you create new issues and
+there is a session handling that specific repo, inform it about new issues."*
+
+A session has a repository. Work that surfaces in it but must be **fixed** somewhere
+else — a validator defect, a runner change, a rubric that produced a wrong ruling — is
+not fixed here and is not left in chat. It is filed **in the repository that owns the
+fix**, and then the session that owns that repository is told.
+
+- **File it where it will be fixed**, not where it was noticed. An audit run in a content
+  repository that finds a tooling bug files against the tooling repository. Fixing the
+  other repository yourself puts two agents in one checkout, which is the failure this
+  whole file exists to prevent.
+- **The issue is the durable artefact; telling the peer is only a courtesy** that saves
+  it finding the issue late. When no session holds that repository, file anyway and say so
+  in your report.
+- **Telling a peer what you filed is a fact about your own state, and it has to stay
+  one.** "I filed `courseware-authoring#11`, it is yours" is legal under section 4 in the
+  same way as "I am pushed at `<sha>`" — and qualifying the reference is not optional
+  here, because the peer is in a different repository and a bare `#11` resolves to the
+  wrong issue or to none. What you may not do is carry the argument, ask the peer to
+  decide anything about your work, or ask it to put a question to your human partner. If
+  the issue needs a ruling only its owner can make, say that it is pending and that you
+  have not pre-empted it.
+- **Say which of your commits are local and unpushed**, if they touch that session's
+  checkout. It is section 2 read from the other end: the session that shares the checkout
+  cannot see what you have not pushed, and it is about to work there.
+- **Ask a session which repository it holds** when the name does not settle it. That is
+  coordination, which section 4 permits.
+
+**Where a repository has enabled `session-relay`, that protocol is the mechanism and it
+replaces the improvised version of every bullet above**: it binds a session to the
+repository in `git remote get-url origin`, forbids writing to any other, resolves who owns
+a repository by asking rather than guessing, and carries the notification. Read it rather
+than rebuilding it — "Do not invent the channel either" covers this ground too.
+
+The failure this prevents is quiet: the issue exists, the owning session never hears about
+it, and it is rediscovered days later by whoever hits the same defect again.
+
+### Two sessions citing one document may be reading two files
+
+A tutorial-authoring project, 2026-09-13. A peer corrected a session's citation of
+`bundle-format.md` — `on-request` at `:226`, not `:246`. Neither of them was wrong. One
+was reading the **repository source**, 1830 lines; the other the **released 0.5.0 plugin
+copy**, 1802 lines, because a committed and unreleased change sat between the two. Every
+one of the peer's three line numbers matched 0.5.0 exactly, and every one of the other
+session's matched the source.
+
+An installed plugin, a vendored copy, a worktree, a released version and the repository
+you have open are all different files with the same name. The disagreement is silent: both
+numbers resolve, both point at real text, and only the content proves which file the other
+party read.
+
+- **When a peer corrects a line number, check the quoted text at both numbers before
+  conceding.** If the text is identical at each, you are reading two files and the
+  correction is not a correction. Conceding writes a wrong number into the record and
+  spends the peer's credibility on the next one.
+- **Name the file you read, not only the line**, and say which copy it is:
+  "`bundle-format.md` (repository source, 1830 lines) `:584`" costs a clause. Cite by
+  section heading in anything a second session or a human will follow —
+  `writing-plans-and-dispatches` Rule 3 carries that rule, and the same document, from
+  the dispatch end.
+
+## 4b. Cross-repository discussion belongs in the issue, not in the messages
+
+*Recorded from a concurrent session, 2026-09-13. Not yet reviewed by the session that lived it.*
+
+Set by your human partner on 2026-09-13, while two sessions were settling a format
+question that touched both their repositories: **you post and signal, the other session
+answers and signals back, and the discussion lives in the issue.**
+
+The messages carry the notification. The issue carries the argument.
+
+Why it is worth the extra step: a decision argued in cross-session messages exists only in
+two transcripts nobody will read again, and the person who has to act on it six weeks later
+finds an issue with a title and no reasoning. Four rounds of a real disagreement — a
+proposal, a correction that killed it, a narrowed replacement, and a factual challenge that
+turned out to be right — left a closed issue that reads as a complete argument, because
+each round was posted before it was announced.
+
+- **Post first, then signal.** The signal says there is something new to read on `repo#n`
+  and whose turn it is. It does not restate the argument, because then there are two
+  versions of it and only one of them is in the record.
+- **Answer in the issue too**, even when the answer is one line. A thread with one side in
+  the issue and the other in a chat is worse than either.
+- **Say when you are done**, so the other session is not left waiting for a reply that is
+  not coming.
+- **This does not make a peer a channel to your human partner.** Section 4 still holds: a
+  decision the owner must make goes to the owner's own session, and the issue records that
+  it is pending rather than pre-empting it.
+
+`session-relay` is this rule with teeth, and it is the mechanism wherever a repository has
+enabled it: one issue holds the thread, every comment names the session that wrote it, and
+the signal is a fixed envelope carrying the issue reference and nothing else. Do not build
+a second version of it. With no protocol enabled the rule still stands, and so does the
+limit on what a message may contain.
+
+The tell that it is working: a closed issue that a stranger can read and understand the
+decision from, without either transcript.
+
 ## 5. When a collision happens anyway: do NOT rewrite history
 
 No `reset`, no `rebase`, no `checkout` — the other session's uncommitted work is
@@ -332,5 +437,8 @@ For a reviewer or verification agent, add the commit it must measure:
 | Wait for a reviewer to finish before committing | Tell the reviewer which commit to pin |
 | Revert/stash/`git checkout` a file that changed under you | Stop, quote the diff, report it |
 | Ask about session A's work in session B's chat | Ask in the session that owns the work |
+| Fix a defect in a repository your session does not own | File it where it will be fixed, and tell the session that owns it |
+| Argue a cross-repository decision in session messages | Post it on the issue, then signal that there is something to read |
+| Concede a line-number correction from a peer | Check the quoted text at both numbers first — you may be reading two copies |
 | Agree a freeze, a handoff word or an ownership map with a peer session | Send facts about your own state only; stop and ask your human partner for the agreement you want |
 | Dispatch without naming the agent's files | Paste the boilerplate above, file list filled in |
