@@ -38,6 +38,12 @@ into a plan document, a session that grew too large to reopen.
   the plugin is the between-sessions path.
 - **Only `startup` rolls.** A resumed session re-injects the stored tone rather than
   rolling a new one, so `--resume` keeps whatever tone was already in play.
+- **Tone adherence depends on the model.** Tested on Haiku and Sonnet: on Sonnet the tone
+  lands reliably. On Haiku it frequently does not — the hook still fires, a tone is still
+  rolled and written to the state file, but the model answers in the plain default voice
+  anyway. The mechanism is working in that case; the model is not following the injected
+  instruction. A Haiku user who sees no tone is looking at a model limitation, not a broken
+  plugin. Other models have not been tested.
 
 ## Two rules to put in your own CLAUDE.md
 
