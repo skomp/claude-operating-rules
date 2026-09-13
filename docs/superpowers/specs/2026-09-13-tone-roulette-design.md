@@ -36,7 +36,7 @@ Everything below was confirmed against Claude Code 2.1.259 on disk, not from doc
 | `hooks/hooks.json` is auto-discovered; `plugin.json` needs no `hooks` key | `learning-output-style/.claude-plugin/plugin.json` carries no hooks key, yet its hook fires |
 | A `SessionStart` hook runs a shipped script via `${CLAUDE_PLUGIN_ROOT}` | `learning-output-style/hooks/hooks.json` |
 | Instructions are injected as `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"..."}}` | `learning-output-style/hooks-handlers/session-start.sh` |
-| `SessionStart` accepts `matcher: "startup\|clear\|compact"` | `superpowers/6.3.0/hooks/hooks.json` |
+| `SessionStart`'s matcher is tested against a `source` field whose observed values are `startup`, `resume`, `clear`, `compact`, `fork` | the binary's `matcherMetadata` for `SessionStart`: `fieldToMatch:"source", values:["startup","resume","clear","compact","fork"]` |
 | Hook stdin JSON includes `session_id` | hook documentation embedded in the 2.1.259 binary |
 | `systemMessage` displays a message to the user, for all hook events | same |
 | `outputStyles` is a valid plugin manifest key | manifest key list in the 2.1.259 binary |
@@ -63,7 +63,7 @@ tone text that exists in two places.
 ```
 plugins/tone-roulette/
 ├── .claude-plugin/plugin.json        # "outputStyles": "./output-styles/"
-├── hooks/hooks.json                  # SessionStart, matcher: startup|clear|compact
+├── hooks/hooks.json                  # SessionStart, matcher: startup|resume|clear|compact
 ├── hooks-handlers/session-start.sh   # roll, persist, announce, inject
 ├── output-styles/
 │   ├── noir-detective.md
@@ -86,11 +86,14 @@ that could not be confirmed against a working example.
 `SessionStart` fires with a matcher value in its stdin JSON:
 
 - **`startup`** — roll. Pick a file from `output-styles/` at random, write the chosen tone
-  name to the state file, emit `systemMessage` announcing it and `additionalContext`
-  carrying the file body.
-- **`clear` / `compact`** — do not roll. Read the state file, re-emit the same tone's
-  `additionalContext`. This is what satisfies requirement 4: compaction can drop the
-  injected instruction, so it is re-injected unchanged rather than re-rolled.
+  name to the state file, emit `systemMessage` (`"🎲 Tone rolled: <name>"`) and
+  `additionalContext` carrying the file body.
+- **`resume` / `clear` / `compact`, with a still-valid tone in the state file** — do not
+  roll. Read the state file, re-emit that same tone's `additionalContext`, and also emit a
+  `systemMessage` — but worded `"🎲 Tone held: <name>"`, not `"rolled"`, because nothing was
+  rolled this run. This is what satisfies requirement 4: compaction can drop the injected
+  instruction, so it is re-injected unchanged rather than re-rolled, and the message is kept
+  (not dropped) because the user may not remember which tone is active after a `/clear`.
 - **`resume` / `clear` / `compact` emit nothing when the state file holds `__off__`.** The
   `/tone off` command writes this literal token instead of deleting the state file, so
   absence keeps meaning "roll" and "off" gets its own explicit representation. `startup`
@@ -146,7 +149,6 @@ a bug.
 | State file unreadable, or holds an unknown tone name | Roll fresh; do not fail |
 | State file holds the literal value `__off__` | On `resume`/`clear`/`compact`: emit nothing, exit 0, session stays untoned. On `startup`: ignore it and roll fresh, same as any other source |
 | `session_id` absent from stdin | Fall back to a single state file keyed by working directory |
-| Tone file missing its frontmatter `name` | Skip that file when building the catalogue |
 
 Every failure path exits 0. A hook belonging to a fun plugin must never degrade a session.
 
@@ -171,12 +173,20 @@ Every failure path exits 0. A hook belonging to a fun plugin must never degrade 
 - **Disabling the plugin mid-session does not retract the tone.** Text already injected is
   in the conversation history. `/tone off` is the mid-session path; disabling the plugin is
   the between-sessions path.
-- **Only `startup` rolls.** `resume`, `clear` and `compact` all re-inject the stored tone
-  from the state file without re-rolling. `fork` is deliberately excluded from the matcher:
+- **Only `startup` rolls unconditionally.** `resume`, `clear` and `compact` re-inject the
+  stored tone from the state file without re-rolling *when the state file names a still-valid
+  tone*. When it doesn't — missing, unreadable, or naming a tone no longer in the catalogue —
+  they roll fresh exactly as `startup` would (see Error handling); `resume` with no state file
+  is not an error case, it is this same fallback. `fork` is deliberately excluded from the
+  matcher:
   if a fork gets a new `session_id` the handler would find no state file and roll a second,
   different tone with its own announcement; if a fork shares the parent's `session_id` the
   resume path would re-emit the same `additionalContext` into a context that already
   contains it. Both outcomes are wrong, so `fork` never fires the hook.
+- **Tone adherence depends on the model.** Tested on Haiku and Sonnet: on Sonnet the tone
+  lands reliably; on Haiku it frequently does not, even though the hook still fires and a
+  tone is still rolled and written to the state file — the mechanism works, the model just
+  doesn't follow the injected instruction. Other models have not been tested.
 
 ## Out of scope
 
