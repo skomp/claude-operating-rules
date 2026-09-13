@@ -1142,6 +1142,116 @@ project_dir_with_output_style() {
   fi
 }
 
+# raw_settings_project RAW_CONTENT -> a fresh project dir whose
+# .claude/settings.local.json holds exactly RAW_CONTENT, byte for byte (no
+# added framing, unlike project_dir_with_output_style above) — used to plant
+# line-layout variants that a fixed-template helper can't produce.
+raw_settings_project() {
+  local raw="$1" dir
+  dir="$(new_tmp_dir)"
+  mkdir -p "$dir/.claude"
+  printf '%s' "$raw" > "$dir/.claude/settings.local.json"
+  printf '%s' "$dir"
+}
+
+# =====================================================================
+# Test 31 — line-layout: the key and the colon split across lines
+# (`"outputStyle"\n: "pirate"`). Legal JSON — whitespace, including a
+# newline, is insignificant between a key and its colon. A single-line
+# `grep -o` never sees this match because the key and the colon fall on
+# different lines; the fix flattens newlines to spaces before matching.
+# =====================================================================
+{
+  proj="$(raw_settings_project "$(printf '{"outputStyle"\n : "pirate"}\n')")"
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+
+  out="$(run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$sid\",\"source\":\"startup\"}" "$proj")"
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && [ -z "$out" ]; then
+    pass "test31: key and colon split across lines still stands the hook down"
+  else
+    fail "test31: expected silence with the key and colon on separate lines, got exit=$ec out='$out'"
+  fi
+
+  check
+  if [ ! -e "$(state_file_for "$home" "$sid")" ]; then
+    pass "test31: no state file is written when the split-layout output style is already chosen"
+  else
+    fail "test31: a state file was written despite the key/colon split output style being set"
+  fi
+}
+
+# =====================================================================
+# Test 32 — line-layout: the colon and the value split across lines
+# (`"outputStyle":\n "pirate"`). Same reasoning as test 31, one token pair
+# later.
+# =====================================================================
+{
+  proj="$(raw_settings_project "$(printf '{"outputStyle":\n "pirate"}\n')")"
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+
+  out="$(run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$sid\",\"source\":\"startup\"}" "$proj")"
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && [ -z "$out" ]; then
+    pass "test32: colon and value split across lines still stands the hook down"
+  else
+    fail "test32: expected silence with the colon and value on separate lines, got exit=$ec out='$out'"
+  fi
+}
+
+# =====================================================================
+# Test 33 — line-layout: a pretty-printed, multi-key settings file with
+# `outputStyle` among other keys, and its own colon/value split onto a
+# further-indented continuation line — the shape a formatter produces for
+# a file that also happens to have other keys around it. Guards two things
+# at once: that flattening does not glue adjacent keys together into a
+# false or corrupted match, and that the split-value case still stands
+# down when it isn't the first or only key in the file.
+# =====================================================================
+{
+  proj="$(raw_settings_project "$(printf '{\n  "model": "opus",\n  "outputStyle":\n    "noir-detective",\n  "theme": "dark"\n}\n')")"
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+
+  out="$(run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$sid\",\"source\":\"startup\"}" "$proj")"
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && [ -z "$out" ]; then
+    pass "test33: a pretty-printed multi-key file with a split outputStyle value still stands the hook down"
+  else
+    fail "test33: expected silence for a pretty-printed multi-key file with a split outputStyle value, got exit=$ec out='$out'"
+  fi
+}
+
+# =====================================================================
+# Test 34 — line-layout: CRLF line endings, with the key, colon and value
+# split across those CRLF-terminated lines. CRLF alone (single line) was
+# already handled before this fix; the untested — and previously broken —
+# combination is CRLF *and* a line split together.
+# =====================================================================
+{
+  proj="$(raw_settings_project "$(printf '{"outputStyle"\r\n:\r\n"pirate"\r\n}\r\n')")"
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+
+  out="$(run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$sid\",\"source\":\"startup\"}" "$proj")"
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && [ -z "$out" ]; then
+    pass "test34: CRLF line endings with the key/colon/value split across lines still stands the hook down"
+  else
+    fail "test34: expected silence for a CRLF, line-split outputStyle value, got exit=$ec out='$out'"
+  fi
+}
+
 echo ""
 echo "Ran $check_count assertions."
 if [ "$fail_count" -gt 0 ]; then

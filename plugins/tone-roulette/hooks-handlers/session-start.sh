@@ -60,15 +60,30 @@ set -u
 #     for a standalone or test invocation where it is unset.
 #
 #     The extraction is the same grep+sed pull already used below for
-#     session_id/source. It is exact, not a heuristic: Claude Code
-#     constrains an outputStyle value to ^[a-z][a-z0-9_-]*$ (a plugin
-#     style's catalogue name) or one of five capitalized built-in names,
-#     so it can never contain a quote or span multiple lines, and every
-#     real-world settings file this was checked against writes one key
-#     per line. Global Constraint 3 forbids jq/python in this handler, not
-#     this kind of single-line regex pull. ---
+#     session_id/source, but run over the file's content with newlines
+#     flattened first, not over the file line-by-line. `grep -o` (without
+#     `-z`) only ever matches within a single line, so legal, formatter- or
+#     hand-produced JSON that breaks the key, the colon or the value onto
+#     separate lines — `"outputStyle"\n: "pirate"` and its variants — would
+#     otherwise never match and would read as "not set", which is a false
+#     negative on exactly the case this function exists for: standing down
+#     when a style IS set. Translating every CR and LF in the file to a
+#     space before grepping closes that gap while staying a single-line
+#     regex pull: a JSON string cannot contain a literal, unescaped newline
+#     (it must be written as the two-character escape `\n`), so a real
+#     newline only ever appears in JSON as insignificant whitespace between
+#     tokens — between the key and the colon, the colon and the value, or
+#     around either — never inside the value itself. Replacing it with a
+#     space therefore cannot merge two distinct tokens into a false match;
+#     it only restores the whitespace-only role a run of `[[:space:]]`
+#     already accounted for in this pattern. The extraction is otherwise
+#     exact, not a heuristic: Claude Code constrains an outputStyle value to
+#     ^[a-z][a-z0-9_-]*$ (a plugin style's catalogue name) or one of five
+#     capitalized built-in names, so it can never contain a quote. Global
+#     Constraint 3 forbids jq/python in this handler, not this kind of
+#     single-line regex pull over flattened text. ---
 output_style_is_set() {
-  local project_dir candidates=() f val
+  local project_dir candidates=() f val flattened
 
   case "$(uname -s 2>/dev/null)" in
     Darwin) candidates+=("/Library/Application Support/ClaudeCode/managed-settings.json") ;;
@@ -84,7 +99,8 @@ output_style_is_set() {
 
   for f in "${candidates[@]}"; do
     [ -n "$f" ] && [ -r "$f" ] || continue
-    val="$(grep -o '"outputStyle"[[:space:]]*:[[:space:]]*"[^"]*"' "$f" 2>/dev/null | head -n 1 | sed -E 's/^"outputStyle"[[:space:]]*:[[:space:]]*"(.*)"$/\1/')"
+    flattened="$(tr '\r\n' '  ' < "$f" 2>/dev/null)"
+    val="$(printf '%s' "$flattened" | grep -o '"outputStyle"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed -E 's/^"outputStyle"[[:space:]]*:[[:space:]]*"(.*)"$/\1/')"
     if [ -n "$val" ]; then
       return 0
     fi

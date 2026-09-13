@@ -67,7 +67,7 @@ plugins/tone-roulette/
 ├── hooks-handlers/session-start.sh   # roll, persist, announce, inject
 ├── output-styles/                    # 19 tone files, one per tone — the directory itself
 │                                      #   is the catalogue; this tree does not enumerate them
-└── skills/tone/SKILL.md              # /tone, /tone <name>, /tone off, /tone list
+└── skills/tone/SKILL.md              # /tone, /tone roll
 ```
 
 `force-for-plugin` is deliberately **not** used. It force-applies a single style, which is
@@ -191,11 +191,14 @@ contains the block byte-for-byte.
 
 | Invocation | Behaviour |
 |---|---|
-| `/tone` | Report the current tone and how it was selected |
-| `/tone <name>` | Switch to a named tone, and update the state file |
-| `/tone roll` | Re-roll at random |
-| `/tone off` | Drop the tone and return to default for the rest of the session |
-| `/tone list` | List the catalogue |
+| `/tone` | Report the current tone — chosen via `/config`, rolled at session start, re-rolled mid-session, or off — and how it was selected |
+| `/tone roll` | Pick a fresh tone at random, adopt it immediately, and update the state file |
+
+Switching to a named tone, listing the catalogue, and turning the tone off are no longer this
+skill's job: every tone is a real Claude Code output style, so `/config` → **Output style**
+already does all three instantly, with no model turn, and keeping a slower copy here would
+just give the two mechanisms something to disagree about. When a user asks for one of these,
+the skill points at `/config` rather than performing an equivalent action itself.
 
 Frontmatter sets `disable-model-invocation: true`, so the skill fires only when the user
 types it. A tone plugin that re-rolled itself because the model thought it relevant would be
@@ -249,8 +252,8 @@ Every failure path exits 0. A hook belonging to a fun plugin must never degrade 
   subagents run their own. Implementer and reviewer agents answer in the default voice.
   This is not fixable from a plugin, and is documented in the README.
 - **Disabling the plugin mid-session does not retract the tone.** Text already injected is
-  in the conversation history. `/tone off` is the mid-session path; disabling the plugin is
-  the between-sessions path.
+  in the conversation history. Choosing a different style via `/config` is the mid-session
+  path; disabling the plugin is the between-sessions path.
 - **Only `startup` rolls unconditionally.** `resume`, `clear` and `compact` re-inject the
   stored tone from the state file without re-rolling *when the state file names a still-valid
   tone*. When it doesn't — missing, unreadable, or naming a tone no longer in the catalogue —
@@ -271,7 +274,7 @@ Every failure path exits 0. A hook belonging to a fun plugin must never degrade 
   section says so explicitly. A reader who does not know this can mistake the performance
   for the substance: "I think the tests maybe passed?" reads as uncertainty about the test
   result, when the result itself was never in doubt. Anyone who needs the assistant's actual
-  confidence should ask directly or switch tones with `/tone <name>`.
+  confidence should ask directly or switch tones via `/config`.
 
 ## Out of scope
 
