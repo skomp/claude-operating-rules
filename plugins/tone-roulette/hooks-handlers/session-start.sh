@@ -6,7 +6,10 @@
 # conversational tone from the plugin's output-styles catalogue, persists the
 # choice per session, and emits a JSON object on stdout carrying a one-line
 # announcement (`systemMessage`) and the tone body with its YAML frontmatter
-# stripped (`hookSpecificOutput.additionalContext`).
+# stripped (`hookSpecificOutput.additionalContext`). Stands down entirely —
+# prints nothing, does nothing — when the user has already chosen a Claude
+# Code output style through the harness's own settings mechanism; see
+# output_style_is_set() below.
 #
 # Contract (see docs/superpowers/specs/2026-09-13-tone-roulette-design.md):
 #   - bash + coreutils only. No jq, no python, no `shuf` (absent on the
@@ -15,6 +18,10 @@
 #     nothing and exits 0.
 #   - No tone text is hardcoded here: the catalogue in output-styles/*.md is
 #     the only source of tone names and bodies.
+#   - Never rolls or re-injects over a tone the user chose deliberately via
+#     the `outputStyle` settings key (by `/config`, by hand-editing a
+#     settings file, or by any other means) — the plugin only ever manages
+#     the *rolled* tone, never a *chosen* one.
 #
 # Catalogue location: ${CLAUDE_PLUGIN_ROOT}/output-styles when
 # CLAUDE_PLUGIN_ROOT is set (the normal case — Claude Code sets it when it
@@ -24,10 +31,79 @@
 
 set -u
 
+# --- Detect whether the user has explicitly chosen a Claude Code output
+#     style (see docs/superpowers/specs/2026-09-13-tone-roulette-design.md,
+#     "Data flow" and "Known limitations"). When one is set, Claude Code's
+#     own output-style machinery owns the tone for this session and this
+#     hook must get out of the way entirely — on every source (startup,
+#     resume, clear, compact, fork), not just startup. Re-injecting the
+#     state file's tone over a deliberate choice on resume/clear/compact is
+#     exactly the bug this guards against.
+#
+#     `outputStyle` is a plain top-level string key that can live in any
+#     Claude Code settings file. This checks the same precedence order
+#     Claude Code itself applies (highest first), stopping at the first
+#     file that actually sets the key:
+#       1. Managed settings (organization policy) — the file-based form
+#          only. An MDM profile (macOS) or an HKLM/HKCU registry value
+#          (Windows) is not a file this script can read, and neither is a
+#          `claude --settings` CLI override for this session — it is never
+#          written to disk or exposed to a hook's stdin/env. Both are
+#          silent gaps; see Known limitations in the design spec.
+#       2. Project local settings  (.claude/settings.local.json)
+#       3. Shared project settings (.claude/settings.json)
+#       4. User settings           (~/.claude/settings.json)
+#     $CLAUDE_PROJECT_DIR is what Claude Code itself sets in a command
+#     hook's environment for the project root (confirmed by reading the
+#     installed `claude` binary's strings: hook subprocesses are spawned
+#     with CLAUDE_PROJECT_DIR already in their env); $PWD is the fallback
+#     for a standalone or test invocation where it is unset.
+#
+#     The extraction is the same grep+sed pull already used below for
+#     session_id/source. It is exact, not a heuristic: Claude Code
+#     constrains an outputStyle value to ^[a-z][a-z0-9_-]*$ (a plugin
+#     style's catalogue name) or one of five capitalized built-in names,
+#     so it can never contain a quote or span multiple lines, and every
+#     real-world settings file this was checked against writes one key
+#     per line. Global Constraint 3 forbids jq/python in this handler, not
+#     this kind of single-line regex pull. ---
+output_style_is_set() {
+  local project_dir candidates=() f val
+
+  case "$(uname -s 2>/dev/null)" in
+    Darwin) candidates+=("/Library/Application Support/ClaudeCode/managed-settings.json") ;;
+    Linux)  candidates+=("/etc/claude-code/managed-settings.json") ;;
+  esac
+
+  project_dir="${CLAUDE_PROJECT_DIR:-$PWD}"
+  candidates+=(
+    "$project_dir/.claude/settings.local.json"
+    "$project_dir/.claude/settings.json"
+    "${HOME:-}/.claude/settings.json"
+  )
+
+  for f in "${candidates[@]}"; do
+    [ -n "$f" ] && [ -r "$f" ] || continue
+    val="$(grep -o '"outputStyle"[[:space:]]*:[[:space:]]*"[^"]*"' "$f" 2>/dev/null | head -n 1 | sed -E 's/^"outputStyle"[[:space:]]*:[[:space:]]*"(.*)"$/\1/')"
+    if [ -n "$val" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 main() {
   local script_dir styles_dir state_dir input session_id source_val state_file
   local tones=() f base existing selected count idx off_token is_off rolled
   local tone_file body escaped_body sys_message escaped_sys_message
+
+  # --- Stand down entirely when an output style is explicitly set. This
+  #     must run before anything else in main(): before the catalogue is
+  #     even read, before stdin is parsed, and regardless of `source` — a
+  #     chosen style pre-empts both the roll path and the resume path. ---
+  if output_style_is_set; then
+    return 0
+  fi
 
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

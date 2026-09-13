@@ -88,22 +88,78 @@ that could not be confirmed against a working example.
 
 ## Data flow
 
-`SessionStart` fires with a matcher value in its stdin JSON:
+Every tone in the catalogue is also a real Claude Code output style (shipped via the
+manifest's `"outputStyles"` key), and Claude Code's own `outputStyle` settings key already
+holds a **chosen** style — instantly, via `/config`, with no model turn — and persists it in
+a settings file rather than the transcript, so it survives compaction and restart on its own.
+The handler's own state file only ever needs to hold one thing beyond that: a **rolled** tone,
+since nothing native can pick one at random. So before anything else, on every source
+(`startup`, `resume`, `clear`, `compact` — `fork` never reaches the handler at all, see Known
+limitations), the handler checks whether a style has been explicitly chosen:
 
-- **`startup`** — roll. Pick a file from `output-styles/` at random, write the chosen tone
-  name to the state file, emit `systemMessage` (`"🎲 Tone rolled: <name>"`) and
-  `additionalContext` carrying the file body.
-- **`resume` / `clear` / `compact`, with a still-valid tone in the state file** — do not
-  roll. Read the state file, re-emit that same tone's `additionalContext`, and also emit a
-  `systemMessage` — but worded `"🎲 Tone held: <name>"`, not `"rolled"`, because nothing was
-  rolled this run. This is what satisfies requirement 4: compaction can drop the injected
-  instruction, so it is re-injected unchanged rather than re-rolled, and the message is kept
-  (not dropped) because the user may not remember which tone is active after a `/clear`.
-- **`resume` / `clear` / `compact` emit nothing when the state file holds `__off__`.** The
-  `/tone off` command writes this literal token instead of deleting the state file, so
-  absence keeps meaning "roll" and "off" gets its own explicit representation. `startup`
-  alone ignores a leftover `__off__` and always rolls a fresh tone — switching off is
-  per-session, and it must never leak into a new one.
+- **An output style is set** (`outputStyle` is a non-empty value in any settings file the
+  handler can read — see "Detecting a chosen style" below) — stand down completely. Print
+  nothing, exit 0. The state file is not read, not rolled, not rewritten; Claude Code's own
+  mechanism owns the tone for the rest of that setting's life, on every source, not just
+  `startup`. This is what stops the two mechanisms fighting: before this check existed,
+  picking a style and then hitting `/clear` or letting the context compact would silently
+  re-inject whatever the state file still held, reverting the user's own choice.
+- **No output style is set**, `SessionStart` fires with a matcher value in its stdin JSON:
+  - **`startup`** — roll. Pick a file from `output-styles/` at random, write the chosen tone
+    name to the state file, emit `systemMessage` (`"🎲 Tone rolled: <name>"`) and
+    `additionalContext` carrying the file body.
+  - **`resume` / `clear` / `compact`, with a still-valid tone in the state file** — do not
+    roll. Read the state file, re-emit that same tone's `additionalContext`, and also emit a
+    `systemMessage` — but worded `"🎲 Tone held: <name>"`, not `"rolled"`, because nothing was
+    rolled this run. This is what satisfies requirement 4: compaction can drop the injected
+    instruction, so it is re-injected unchanged rather than re-rolled, and the message is kept
+    (not dropped) because the user may not remember which tone is active after a `/clear`.
+  - **`resume` / `clear` / `compact` emit nothing when the state file holds `__off__`.** This
+    token is a legacy artifact: an earlier version of the `/tone off` command wrote it
+    instead of deleting the state file, so absence kept meaning "roll" and "off" got its own
+    explicit representation. The skill no longer writes it — turning the tone off is now
+    `/config` → Output style → Default, which the output-style check above already handles —
+    but the handler still honors a leftover `__off__` from a state file written before this
+    change, or from manual editing. `startup` alone ignores a leftover `__off__` and always
+    rolls a fresh tone — switching off was always per-session, and it must never leak into a
+    new one.
+
+### Detecting a chosen style
+
+`outputStyle` is a plain top-level string key that can live in any Claude Code settings file.
+The handler checks the same precedence order Claude Code itself applies (highest first),
+stopping at the first file that actually sets the key:
+
+1. Managed settings (organization policy) — the file-based form only:
+   `/Library/Application Support/ClaudeCode/managed-settings.json` on macOS,
+   `/etc/claude-code/managed-settings.json` on Linux. An MDM profile (macOS) or an
+   HKLM/HKCU registry value (Windows) is not a file this script can read, and neither is a
+   `claude --settings` CLI override for this session — see Known limitations.
+2. Project local settings (`.claude/settings.local.json`) — the file `/config` itself writes
+   to.
+3. Shared project settings (`.claude/settings.json`).
+4. User settings (`~/.claude/settings.json`).
+
+`$CLAUDE_PROJECT_DIR` is what Claude Code itself sets in a command hook's environment for the
+project root (confirmed by reading the installed `claude` binary's strings: hook subprocesses
+are spawned with `CLAUDE_PROJECT_DIR` already in their env); `$PWD` is the fallback for a
+standalone or test invocation where it is unset.
+
+The extraction is the same grep+sed pull already used for `session_id`/`source`, not `jq` or
+`python` (Global Constraint 3 forbids both in the handler). It is exact, not a heuristic:
+Claude Code constrains an `outputStyle` value to `^[a-z][a-z0-9_-]*$` (a plugin style's
+catalogue name — confirmed against the same schema string that validates plugin manifest
+names in the 2.1.259 binary) or one of five capitalized built-in names (`Default`,
+`Proactive`, `Concise`, `Explanatory`, `Learning`), so the value can never contain a quote or
+span multiple lines, and every real-world settings file checked against this writes one key
+per line.
+
+The hook's own stdin JSON was checked first and does **not** carry the active output style at
+all (confirmed against the `SessionStart` schema embedded in the 2.1.259 binary: `session_id`,
+`transcript_path`, `cwd`, `prompt_id`, `permission_mode`, `agent_id`, `agent_type`, `source`,
+`model`, `session_title`, and three resume/fork-only cache-cost fields — no `outputStyle` or
+`output_style` field anywhere), so reading settings files is not a fallback, it is the only
+way.
 
 State lives at `~/.claude/tone-roulette/<session_id>`, a single line holding the tone name.
 `session_id` comes from the hook's stdin JSON. If the state file is missing when `resume` /
@@ -161,6 +217,7 @@ a bug.
 
 | Condition | Behaviour |
 |---|---|
+| An output style is explicitly set (`outputStyle` in any settings file the handler can read) | Emit nothing, exit 0. Checked first, before the catalogue or the state file, on every source — not only `startup` |
 | `output-styles/` missing or empty | Emit nothing, exit 0. The session proceeds untoned |
 | State file unreadable, or holds an unknown tone name | Roll fresh; do not fail |
 | State file holds the literal value `__off__` | On `resume`/`clear`/`compact`: emit nothing, exit 0, session stays untoned. On `startup`: ignore it and roll fresh, same as any other source |
@@ -184,6 +241,22 @@ Every failure path exits 0. A hook belonging to a fun plugin must never degrade 
 
 ## Known limitations
 
+- **A `claude --settings` CLI override and MDM-delivered policy (a macOS configuration
+  profile, or a Windows registry value) are invisible to the stand-down check.** Both can set
+  `outputStyle` at a higher precedence than every file the handler reads, but neither is a
+  file the handler reads: a CLI override is never written to disk or exposed to a hook's
+  stdin or environment, and MDM policy lives in a plist or the registry, not
+  `managed-settings.json`. In both cases the handler can wrongly conclude no style is chosen
+  and roll over one that in fact takes effect. This is a narrow, rare gap — most machines
+  running this plugin have neither in play — documented rather than silently accepted.
+- **The standalone `/output-style` command is gone.** It was deprecated in Claude Code
+  v2.1.73 and removed in v2.1.91 (confirmed against the installed 2.1.259 binary: running it
+  now prints "`/output-style` moved → Output style in `/config`" and does nothing else).
+  `/config` → **Output style** is the current way to choose or list a style with no model
+  turn; this plugin's skill and README point at `/config`, not at the old command, for
+  exactly that reason. A user on an older release where `/output-style` still works can use
+  it interchangeably — the `outputStyle` settings key the handler checks is the same either
+  way.
 - **Subagents do not inherit the tone.** Forks inherit the parent's system prompt; other
   subagents run their own. Implementer and reviewer agents answer in the default voice.
   This is not fixable from a plugin, and is documented in the README.

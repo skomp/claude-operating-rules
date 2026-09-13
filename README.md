@@ -29,15 +29,37 @@ into a plan document, a session that grew too large to reopen.
 /plugin install tone-roulette
 ```
 
+## tone-roulette: the division of labour
+
+Every tone in the catalogue is also a real Claude Code output style, so `/config` (under
+**Output style**) already lists and switches between all of them instantly, with no model
+turn, and Claude Code persists that choice in a settings file rather than the conversation —
+it survives `/clear` and restart on its own. The plugin's `SessionStart` hook exists for the
+one thing `/config` can't do: pick a tone at random. It checks first whether you've already
+chosen a style; if you have, it does nothing at all, on every session start, resume, clear or
+compact, not only the first one. Only when nothing is chosen does it roll, hold the roll in a
+small per-session state file, and re-inject it across compaction. `/tone roll` is the only
+`/tone` verb left that does its own work — switching to a specific tone, listing the
+catalogue, and turning the tone off are all faster done through `/config` directly, and the
+`tone` skill just points you there. See the row above and the design spec's Data flow section
+for the mechanics.
+
 ## tone-roulette: known limitations
 
 - **Subagents do not inherit the tone.** Forks inherit the parent's system prompt; other
   subagents run their own. Implementer and reviewer agents answer in the default voice.
 - **Disabling the plugin mid-session does not retract a tone already injected.** The text
-  is already in the conversation history. `/tone off` is the mid-session path; disabling
-  the plugin is the between-sessions path.
-- **Only `startup` rolls.** A resumed session re-injects the stored tone rather than
-  rolling a new one, so `--resume` keeps whatever tone was already in play.
+  is already in the conversation history. Choosing a different style via `/config` is the
+  mid-session path; disabling the plugin is the between-sessions path.
+- **Only `startup` rolls, and only when no output style is chosen.** A resumed session
+  re-injects the stored *rolled* tone rather than rolling a new one, so `--resume` keeps
+  whatever was already in play — but if you've chosen a style via `/config` since the last
+  `startup`, the hook stands down instead, on every source, and neither rolls nor re-injects
+  over your choice.
+- **A `claude --settings` CLI override or an MDM-delivered policy can pick a style the hook
+  can't see.** Both take effect over anything in a settings file, but neither is a file the
+  hook can read, so on the rare machine where one is in play the hook may roll over a style
+  that in fact takes effect. See the design spec's Known limitations for detail.
 - **Tone adherence depends on the model.** Tested on Haiku and Sonnet: on Sonnet the tone
   lands reliably. On Haiku it frequently does not — the hook still fires, a tone is still
   rolled and written to the state file, but the model answers in the plain default voice
@@ -48,7 +70,7 @@ into a plan document, a session that grew too large to reopen.
   `second-guess-sid` and `nervous-nellie`. Their hedging is a speech register, not a
   confidence signal: the underlying assessment is unchanged whether or not the tone is
   hedging it. If you need to know how confident the assistant actually is, ask directly or
-  switch tones with `/tone <name>`.
+  switch tones via `/config`.
 
 ## Two rules to put in your own CLAUDE.md
 

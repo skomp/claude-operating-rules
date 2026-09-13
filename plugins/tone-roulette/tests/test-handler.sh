@@ -9,6 +9,12 @@
 # so the empty-catalogue and joke-tone-body cases never touch the shipped
 # catalogue.
 #
+# Every test also runs with CLAUDE_PROJECT_DIR pointed at a fresh temp
+# directory — DEFAULT_PROJECT_DIR when a test doesn't pass its own — so a
+# test never reads this repository's own (nonexistent) .claude/settings*
+# files, and so the output-style stand-down (tests 25-30) can be exercised
+# by pointing a single test at a project dir that does carry one.
+#
 # Uses `jq` for assertions (allowed in tests; the handler itself must not
 # depend on it). No dependency on `shuf`.
 #
@@ -87,10 +93,23 @@ if [ "${#TONES[@]}" -eq 0 ]; then
   exit 1
 fi
 
-# run_handler HOME ROOT STDIN_STRING > stdout, returns handler's exit code.
+# A project directory with no .claude/settings*.json in it at all — the
+# default CLAUDE_PROJECT_DIR for every run_handler call that doesn't pass
+# its own, so the 21 pre-existing call sites (and any that don't care about
+# output-style detection) see no outputStyle key by construction, the same
+# way they already see an isolated $HOME with no real ~/.claude in it.
+# Without this, an unset CLAUDE_PROJECT_DIR would fall back to the
+# handler's $PWD — wherever this test file happens to be invoked from —
+# which is exactly the kind of ambient, cwd-dependent behaviour these tests
+# otherwise go out of their way to avoid.
+DEFAULT_PROJECT_DIR="$(new_tmp_dir)"
+
+# run_handler HOME ROOT STDIN_STRING [PROJECT_DIR] > stdout, returns
+# handler's exit code. PROJECT_DIR defaults to DEFAULT_PROJECT_DIR (no
+# settings files) when omitted.
 run_handler() {
-  local home="$1" root="$2" stdin_str="$3"
-  printf '%s' "$stdin_str" | HOME="$home" CLAUDE_PLUGIN_ROOT="$root" bash "$HANDLER"
+  local home="$1" root="$2" stdin_str="$3" project_dir="${4:-$DEFAULT_PROJECT_DIR}"
+  printf '%s' "$stdin_str" | HOME="$home" CLAUDE_PLUGIN_ROOT="$root" CLAUDE_PROJECT_DIR="$project_dir" bash "$HANDLER"
 }
 
 state_file_for() {
@@ -956,6 +975,170 @@ days_ago_ts() {
     pass "test24: handler output stays valid JSON when \$HOME contains a space and a glob character"
   else
     fail "test24: handler output was not valid JSON under a space+glob \$HOME (exit=$ec, out=$out)"
+  fi
+}
+
+# project_dir_with_output_style FILE_BASENAME OUTPUT_STYLE_JSON_VALUE
+# -> a fresh project dir whose .claude/<FILE_BASENAME> sets "outputStyle"
+# to the given already-JSON-quoted value (e.g. '"pirate"' or '""').
+project_dir_with_output_style() {
+  local file_basename="$1" value_json="$2" dir
+  dir="$(new_tmp_dir)"
+  mkdir -p "$dir/.claude"
+  printf '{\n  "outputStyle": %s\n}\n' "$value_json" > "$dir/.claude/$file_basename"
+  printf '%s' "$dir"
+}
+
+# =====================================================================
+# Test 25 — the stand-down: an output style set in project local settings
+# (.claude/settings.local.json, the file `/config` itself writes to) means
+# a `startup` run emits nothing at all and exits 0. No systemMessage, no
+# additionalContext, no rolled tone, no state file written.
+# =====================================================================
+{
+  proj="$(project_dir_with_output_style "settings.local.json" '"pirate"')"
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+
+  out="$(run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$sid\",\"source\":\"startup\"}" "$proj")"
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && [ -z "$out" ]; then
+    pass "test25: startup with an output style set in settings.local.json prints nothing and exits 0"
+  else
+    fail "test25: expected empty output and exit 0, got exit=$ec out='$out'"
+  fi
+
+  check
+  if [ ! -e "$(state_file_for "$home" "$sid")" ]; then
+    pass "test25: no state file is written when the output style is already chosen"
+  else
+    fail "test25: a state file was written even though the output style was already chosen"
+  fi
+}
+
+# =====================================================================
+# Test 26 — the contrast case: with no output style set anywhere (a fresh
+# project dir with no .claude/settings*.json at all), startup still rolls
+# exactly as before. Proves test 25's silence comes from detecting the
+# chosen style, not from some unrelated regression that silences every run.
+# =====================================================================
+{
+  proj="$(new_tmp_dir)"
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+
+  out="$(run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$sid\",\"source\":\"startup\"}" "$proj")"
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && printf '%s' "$out" | jq -e '.systemMessage | test("rolled")' >/dev/null 2>&1; then
+    pass "test26: startup with no output style set anywhere still rolls and announces it"
+  else
+    fail "test26: expected a rolled-tone announcement with no output style set, got exit=$ec out=$out"
+  fi
+}
+
+# =====================================================================
+# Test 27 — the fight this whole change exists to end: an output style
+# chosen mid-session must win over a state file that still holds an
+# earlier rolled tone, on `resume` (not just `startup`). Before this
+# change, resume/clear/compact always re-injected the state file's tone
+# regardless of what the user had since chosen natively.
+# =====================================================================
+{
+  proj="$(project_dir_with_output_style "settings.local.json" '"noir-detective"')"
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+  sfile="$(state_file_for "$home" "$sid")"
+  mkdir -p "$(dirname "$sfile")"
+  printf '%s\n' "${TONES[0]}" > "$sfile"
+
+  out="$(run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$sid\",\"source\":\"resume\"}" "$proj")"
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && [ -z "$out" ]; then
+    pass "test27: resume with an output style set prints nothing and exits 0, even with a rolled tone still on file"
+  else
+    fail "test27: expected silence on resume once a style is chosen, got exit=$ec out='$out'"
+  fi
+
+  check
+  existing="$(cat "$sfile" 2>/dev/null)"
+  if [ "$existing" = "${TONES[0]}" ]; then
+    pass "test27: the state file is left exactly as it was — resume does not touch it once a style is chosen"
+  else
+    fail "test27: the state file changed from '${TONES[0]}' to '$existing'"
+  fi
+}
+
+# =====================================================================
+# Test 28 — user settings (~/.claude/settings.json) is checked too, not
+# only the project-level files: /config isn't the only way outputStyle
+# gets set by hand, and a user-level choice must stand down just the same.
+# =====================================================================
+{
+  home="$(new_tmp_dir)"
+  mkdir -p "$home/.claude"
+  printf '{"outputStyle":"Explanatory"}' > "$home/.claude/settings.json"
+  proj="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+
+  out="$(run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$sid\",\"source\":\"startup\"}" "$proj")"
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && [ -z "$out" ]; then
+    pass "test28: an output style set only in ~/.claude/settings.json also stands the hook down"
+  else
+    fail "test28: expected silence for a user-settings-only output style, got exit=$ec out='$out'"
+  fi
+}
+
+# =====================================================================
+# Test 29 — false-positive guard: a settings file existing at all must not
+# be mistaken for an output style being set. A settings.json with unrelated
+# keys and no "outputStyle" key must still roll.
+# =====================================================================
+{
+  proj="$(new_tmp_dir)"
+  mkdir -p "$proj/.claude"
+  printf '{"model": "opus", "theme": "dark"}' > "$proj/.claude/settings.json"
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+
+  out="$(run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$sid\",\"source\":\"startup\"}" "$proj")"
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && printf '%s' "$out" | jq -e '.systemMessage | test("rolled")' >/dev/null 2>&1; then
+    pass "test29: a settings.json with no outputStyle key still rolls (file presence alone is not the signal)"
+  else
+    fail "test29: expected a roll when outputStyle is absent from an existing settings file, got exit=$ec out=$out"
+  fi
+}
+
+# =====================================================================
+# Test 30 — edge case: an explicit but empty "outputStyle" value counts as
+# not set, and the hook still rolls. Nothing in the real product is known
+# to write an empty string here, but the extraction must not treat it as
+# a chosen style either.
+# =====================================================================
+{
+  proj="$(project_dir_with_output_style "settings.local.json" '""')"
+  home="$(new_tmp_dir)"
+  sid="$(next_session_id)"
+
+  out="$(run_handler "$home" "$PLUGIN_ROOT" "{\"session_id\":\"$sid\",\"source\":\"startup\"}" "$proj")"
+  ec=$?
+
+  check
+  if [ "$ec" -eq 0 ] && printf '%s' "$out" | jq -e '.systemMessage | test("rolled")' >/dev/null 2>&1; then
+    pass "test30: an empty outputStyle value is treated as not set, and the hook still rolls"
+  else
+    fail "test30: expected a roll for an empty outputStyle value, got exit=$ec out=$out"
   fi
 }
 
