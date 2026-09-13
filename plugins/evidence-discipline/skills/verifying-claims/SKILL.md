@@ -91,6 +91,38 @@ An OAuth service, 2026-09-09. Three times in one session you reported a security
 
 The same session had three tests that could not fail, and a demo script `CLAUDE.md` called "an acceptance step" whose only assertion was that its audit-record count matched its request count — so it exited 0 on a chain where **every** request was rejected. Its fix had to break the chain deliberately and show the script fail before showing it pass.
 
+### A search of the content cannot report on the metadata
+
+This repository, 2026-09-13, preparing it for publication. Two independent audits
+reported the working tree clean of identifying information. Both were right, and both
+were useless: the names were in **commit messages and author emails**, which neither
+audit read. The gap was found by a third pass that happened to look at `git log`.
+
+One audit was strong by every other measure — 43 needles, proven to fire by planting
+three of them first. It still could not report on a class of data it never opened.
+Then the same shape repeated one level up: a `filter-branch --msg-filter` cleaned
+every message body and left the trailer and the author email untouched, because those
+are metadata about the commit rather than text inside the message. The fix had the
+identical blind spot as the audit that preceded it.
+
+**State what a probe reads, not what it concludes.** "The repository is clean" was
+never supported; "no file content matches these 43 needles" was. The first phrasing
+silently annexes commit messages, authorship, tags, branch names, reflogs and
+remotes; the second invites the obvious question.
+
+For anything you are about to call clean before publishing, the surfaces are at
+least: file content, commit messages, author and committer identity, branch and tag
+names, and whatever the forge shows that the local repository does not.
+
+```sh
+git log --all --format='%ae%n%ce' | sort -u     # every identity in the history
+git log --all --format='%B' | grep -iE '<needles>'
+git for-each-ref --format='%(refname)'          # names leak too
+```
+
+And check the forge, not only your refs: local and remote disagreed here, and the
+published side is the one that matters.
+
 ### A 404 from one endpoint is not proof of absence
 
 An agent-seat plugin repo, 2026-09-02. You checked `GET /repos/{owner}/{repo}/branches/main/protection`, got a 404, and reported main as unprotected. It was protected — by a **ruleset**, which that endpoint does not report. Two commits went straight to main and the push said so plainly: `remote: Bypassed rule violations for refs/heads/main`.

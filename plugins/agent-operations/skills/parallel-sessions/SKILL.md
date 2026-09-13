@@ -206,6 +206,45 @@ opposite conclusion, which is worse than not noticing.**
 The rule against reverting a collision lived in a human's head. It never reached the
 *dispatch*, which is where it had to be. Hence section 6.
 
+### A rebase rewrites other people's refs, including their backups
+
+This repository, 2026-09-13. Two sessions were cleaning commit metadata out of one
+checkout. One took backup branches before rewriting — the standard move that makes a
+rewrite reversible. The other then ran `git rebase --onto origin/main <old-base>
+<its-branch>` and **moved two of those backup refs off the commits they existed to
+preserve**, onto its own new tip.
+
+That is not a bug. `rebase.updateRefs` force-updates any branch pointing at a commit
+being rebased, and here it was `true` in `~/.gitconfig` — **global, so every
+repository and every session on the machine**, not something one project opted into.
+The only warning is a line in the rebase output that scrolls past.
+
+The cruel part is the selection effect: **a backup ref is, by definition, a ref
+pointing into the range you are about to rewrite.** These are the refs
+`--update-refs` is most likely to move, and they are the ones whose whole job is to
+still be there afterwards.
+
+Recovery worked only because the commit was also on the remote. A backup that exists
+solely as a local branch, in a checkout where someone else may rebase, is not yet a
+backup.
+
+So, before rebasing in a shared checkout:
+
+```sh
+git config --get rebase.updateRefs        # true is the dangerous case
+git for-each-ref --contains <base>        # every ref the rebase may move
+```
+
+Six refs were in range here. If the list holds refs you do not own, either pass
+`--no-update-refs` for that rebase or tell the session that owns them first.
+
+**And do not reach for a tag as the safe alternative without checking.** The same
+session also took a tag backup, confirmed it existed, and found it gone afterwards —
+with no determination of what removed it. `--update-refs` is documented to move
+branches, not tags, so the tag "should" have survived; it did not, and an
+unverified "should" was one edit away from becoming a rule in this file. Push the
+backup, or verify the ref after every rewrite anybody performs.
+
 ## 6. Dispatch boilerplate — paste into every agent prompt
 
 Use it every time an agent owns a file a human might also touch. Fill in the file
