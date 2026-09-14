@@ -1,6 +1,6 @@
 import unittest
 from machines.declaration import parse
-from machines.machine import check_machine
+from machines.machine import Machine, State, Transition, check_machine
 from tests.test_declaration import VALID  # the known-good declaration
 
 def mutate(old, new):
@@ -168,6 +168,55 @@ class TestChecksNoTaskOwned(unittest.TestCase):
         # here would reject machines that are perfectly runnable.
         m = mutate("cap: 10", "cap: 2")
         self.assertEqual(check_machine(m), [])
+
+    def test_local_moves_on_the_shortest_run_do_not_count_against_the_cap(self):
+        # The re-reviewer's own machine: two purely-local moves
+        # (`signal: false`) followed by one signalling move, and cap 1.
+        # `cap` bounds outbound *messages*, and a local move emits none --
+        # so this run costs 1, not 3, and cap 1 must accept it. Counting
+        # every transition (the pre-fix behaviour) wrongly rejected this
+        # exact shape.
+        m = Machine(
+            "local-moves-test", "v1", "x",
+            {"role": "party"}, {"step1", "step2", "step3"}, 1,
+            "start",
+            {
+                "start": State("start"),
+                "middle": State("middle"),
+                "late": State("late"),
+                "done": State("done", terminal=True),
+            },
+            [
+                Transition("start", "step1", "role", "middle", signal=False),
+                Transition("middle", "step2", "role", "late", signal=False),
+                Transition("late", "step3", "role", "done", signal=True),
+            ],
+        )
+        self.assertEqual(check_machine(m), [])
+
+    def test_a_cap_exceeded_by_signalling_transitions_alone_is_reported(self):
+        # Two consecutive `signal: true` transitions and nothing else on
+        # the only run to a terminal state, cap 1. The direction that
+        # matters most to get right: under-counting here would silently
+        # accept a machine that really does exceed its cap.
+        m = Machine(
+            "signal-only-test", "v1", "x",
+            {"role": "party"}, {"step1", "step2"}, 1,
+            "start",
+            {
+                "start": State("start"),
+                "middle": State("middle"),
+                "done": State("done", terminal=True),
+            },
+            [
+                Transition("start", "step1", "role", "middle", signal=True),
+                Transition("middle", "step2", "role", "done", signal=True),
+            ],
+        )
+        problems = check_machine(m)
+        cap_problems = [p for p in problems if "cap" in p]
+        self.assertEqual(len(cap_problems), 1, problems)
+        self.assertIn("2 signalling transitions", cap_problems[0])
 
     def test_a_declared_kind_no_transition_fires_on_is_reported(self):
         m = mutate("kinds: [triage, question, answer, conclusion, stalemate]",

@@ -169,18 +169,25 @@ otherwise do with no error at all.
 non-integer (including a quoted string) are all rejected. **Required.**
 
 The transition cap: the maximum number of outbound messages this machine's engine will ever
-emit for one run. It caps transitions, not comments — a bundle's "ten comments per sender"
-rule is that bundle's choice of value, not the framework's. This is the field that makes
-termination checkable at all: a machine that can run forever is exactly a machine with no
-enforced cap and no path to a terminal state, so `cap` has to exist, has to be a real count,
-and cannot be disguised as `true` (which is why the parser rejects a boolean here even though
-Python considers `True` an `int`).
+emit for one run. It caps outbound messages, not transitions and not comments — a purely
+local move (`signal: false`) is not an outbound message, so it does not count against `cap`
+even though it is a transition; and a bundle's "ten comments per sender" rule is that
+bundle's choice of value, not the framework's. This is the field that makes termination
+checkable at all: a machine that can run forever is exactly a machine with no enforced cap
+and no path to a terminal state, so `cap` has to exist, has to be a real count, and cannot
+be disguised as `true` (which is why the parser rejects a boolean here even though Python
+considers `True` an `int`).
 
 **The cap is compared to the machine, not just validated on its own.** `check_machine`
-measures the shortest run from `initial` to a terminal state and reports a cap smaller than
-that: a machine declared both to terminate and to exhaust its budget before it can is a
-machine that cannot legally finish. A cap that is merely generous is not reported — only
-one no run can satisfy.
+measures the shortest run from `initial` to a terminal state and counts only that run's
+`signal: true` transitions — a `signal: false` transition costs nothing, because it emits
+no message a peer ever sees — then reports a cap smaller than that count: a machine
+declared both to terminate and to exhaust its signalling budget before it can is a machine
+that cannot legally finish. A cap that is merely generous is not reported — only one no run
+can satisfy. Because a local move is free, the "shortest run" the check optimizes for is the
+one with the fewest *signalling* transitions, not the fewest transitions of any kind — a run
+that takes a long detour through local moves and fires only one signal is cheaper, for this
+purpose, than a two-hop run that signals twice.
 
 ## `initial`
 

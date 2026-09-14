@@ -1,5 +1,9 @@
+from collections import deque
+
 REQUIRED = ("machine", "version", "prefix", "roles", "kinds",
             "cap", "initial", "states", "transitions")
+
+_INFINITY = float("inf")
 
 
 class State(object):
@@ -153,43 +157,71 @@ def check_machine(m):
         for name in sorted(reachable - can_finish):
             problems.append("state %r cannot reach a terminal state" % name)
 
-        # Cap satisfiability. `cap` bounds the outbound messages one run
-        # may emit, i.e. the transitions it may fire. If even the shortest
-        # path from `initial` to a terminal state is longer than the cap,
-        # no run can both stay under the cap and end legitimately -- the
-        # machine is declared to terminate and declared unable to. BFS,
-        # because it is the shortest path that decides this, not any path.
+        # Cap satisfiability. `cap` bounds the outbound messages one run may
+        # emit -- the transitions it fires with `signal: true`, not every
+        # transition it fires. A `signal: false` move is purely local: it
+        # is not an outbound message and does not cost against the cap
+        # (see SCHEMA.md's `cap` and `signal` sections). If even the
+        # cheapest run from `initial` to a terminal state fires more
+        # signalling transitions than the cap allows, no run can both stay
+        # under the cap and end legitimately -- the machine is declared to
+        # terminate and declared unable to.
+        #
+        # This makes it a shortest *weighted* path problem, not a plain
+        # BFS: a `signal: true` edge costs 1, a `signal: false` edge costs
+        # 0, and a run may freely spend any number of free local moves.
+        # 0-1 BFS (a deque, pushing a 0-weight relaxation to the front and
+        # a 1-weight relaxation to the back) finds that shortest weighted
+        # distance in linear time, same as plain BFS would for the
+        # unweighted graph it replaces.
         #
         # Nothing is reported when no terminal state is reachable at all:
         # that is already the termination check's finding, and a cap
         # message on top of it would be a second symptom of one cause.
-        shortest = _shortest_distance(m.initial, terminals, forward)
+        signal_forward = {}
+        for t in m.transitions:
+            signal_forward.setdefault(t.frm, []).append((t.to, 1 if t.signal else 0))
+
+        shortest = _shortest_signal_distance(m.initial, terminals, signal_forward)
         if shortest is not None and shortest > m.cap:
             problems.append(
                 "cap %d is too small: the shortest run from %r to a terminal "
-                "state fires %d transitions" % (m.cap, m.initial, shortest))
+                "state fires %d signalling transitions" % (m.cap, m.initial, shortest))
 
     return problems
 
 
-def _shortest_distance(start, goals, graph):
-    """Breadth-first distance in edges from `start` to the nearest member of
-    `goals`, or None when no member of `goals` is reachable.
+def _shortest_signal_distance(start, goals, graph):
+    """Shortest weighted distance from `start` to the nearest member of
+    `goals`, where `graph[node]` is a list of `(target, weight)` edges and
+    `weight` is 1 for a `signal: true` transition, 0 for `signal: false`.
+    Returns None when no member of `goals` is reachable at all.
+
+    This is 0-1 BFS, not plain BFS: a graph with only 0/1 edge weights has
+    a shortest-path structure plain (unweighted) BFS cannot compute
+    correctly, because a 0-weight edge can make a "farther" node (by hop
+    count) actually cheaper. A deque keeps the frontier ordered by
+    distance without a heap: relaxing a node along a weight-0 edge pushes
+    it to the *front* (it belongs at the current distance), and along a
+    weight-1 edge pushes it to the *back* (it belongs one distance further
+    out) -- so the deque is popped in non-decreasing distance order, same
+    as plain BFS's FIFO queue is when every edge costs 1.
     """
-    frontier = [start]
-    seen = {start}
-    distance = 0
+    dist = {start: 0}
+    frontier = deque([start])
     while frontier:
-        if any(node in goals for node in frontier):
-            return distance
-        following = []
-        for node in frontier:
-            for target in graph.get(node, ()):
-                if target not in seen:
-                    seen.add(target)
-                    following.append(target)
-        frontier = following
-        distance += 1
+        node = frontier.popleft()
+        d = dist[node]
+        if node in goals:
+            return d
+        for target, weight in graph.get(node, ()):
+            candidate = d + weight
+            if candidate < dist.get(target, _INFINITY):
+                dist[target] = candidate
+                if weight == 0:
+                    frontier.appendleft(target)
+                else:
+                    frontier.append(target)
     return None
 
 
