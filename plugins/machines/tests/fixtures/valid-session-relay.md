@@ -13,10 +13,10 @@ kinds: [triage, question, answer, conclusion, stalemate]
 cap: 10
 initial: unopened
 states:
-  - { name: unopened, holder: initiator }
+  - { name: unopened, holder: initiator, accepting: true }
   - { name: awaiting-triage, holder: responder }
   - { name: awaiting-answer, holder: initiator }
-  - { name: concluded, terminal: true }
+  - { name: concluded, terminal: true, accepting: true }
   - { name: stalled, terminal: true }
 transitions:
   - { from: unopened, on: triage, by: initiator, to: awaiting-triage, signal: true,

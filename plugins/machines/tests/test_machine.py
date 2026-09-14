@@ -12,6 +12,29 @@ def mutate(old, new):
     assert old in VALID, "mutate(%r, ...) matched nothing in VALID" % old
     return parse(VALID.replace(old, new))
 
+
+def _linear_machine(cap):
+    """start -(signal)-> middle -(signal)-> done, and only `done` accepts.
+
+    Two signalling transitions to the one place a run may legitimately
+    stop, so the shortest signalling distance to an accepting state is
+    exactly 2 and the cap check has a boundary to be right or wrong about.
+    """
+    return Machine(
+        "linear-test", "v1", "x",
+        {"role": "party"}, {"step1", "step2"}, cap,
+        "start",
+        {
+            "start": State("start"),
+            "middle": State("middle"),
+            "done": State("done", terminal=True, accepting=True),
+        },
+        [
+            Transition("start", "step1", "role", "middle", signal=True),
+            Transition("middle", "step2", "role", "done", signal=True),
+        ],
+    )
+
 class TestCheckMachine(unittest.TestCase):
     def test_the_known_good_machine_has_no_problems(self):
         self.assertEqual(check_machine(parse(VALID)), [])
@@ -51,32 +74,11 @@ class TestCheckMachine(unittest.TestCase):
             "concluded", "question", "responder", "awaiting-triage"))
         self.assertTrue(any("concluded" in p for p in check_machine(m)))
 
-    def test_a_machine_with_no_terminal_state_is_reported(self):
-        # Assert the *specific* message, not just the word "terminal".
-        # Deleting this check entirely left all 132 tests passing when
-        # this assertion read `any("terminal" in p ...)`: with no terminal
-        # state, the can-reach-a-terminal-state check fires for every
-        # state, and its messages contain "terminal" too. A test that a
-        # deleted check still satisfies is not testing that check.
-        m = parse(VALID)
-        for s in m.states.values():
-            s.terminal = False
-        self.assertTrue(
-            any("no state is terminal" in p for p in check_machine(m)))
-
     def test_an_unreachable_state_is_reported(self):
         m = parse(VALID)
-        m.states["orphan"] = type(m.states["concluded"])("orphan", terminal=True)
+        m.states["orphan"] = type(m.states["concluded"])(
+            "orphan", terminal=True, accepting=True)
         self.assertTrue(any("orphan" in p for p in check_machine(m)))
-
-    def test_a_state_that_cannot_reach_a_terminal_state_is_reported(self):
-        # Remove both exits from awaiting-triage, leaving a two-state loop.
-        m = parse(VALID)
-        m.transitions = [t for t in m.transitions
-                         if t.on not in ("conclusion", "stalemate")]
-        problems = check_machine(m)
-        self.assertTrue(any("awaiting-triage" in p and "terminal" in p
-                            for p in problems))
 
     def test_an_effect_outside_the_vocabulary_is_reported(self):
         m = mutate('"label.add:session-relay:stalled"', '"run:curl example.com"')
@@ -155,10 +157,19 @@ class TestChecksNoTaskOwned(unittest.TestCase):
         self.assertEqual(check_machine(m), [])
 
     def test_a_cap_smaller_than_the_shortest_run_is_reported(self):
-        # unopened -> awaiting-triage -> concluded is two transitions, so
-        # cap 1 makes terminating and staying under the cap mutually
-        # exclusive. `m.cap` was read by nothing before this check.
-        m = mutate("cap: 10", "cap: 1")
+        # start -> middle -> done is two signalling transitions to the only
+        # accepting state, so cap 1 makes settling and staying under the cap
+        # mutually exclusive. `m.cap` was read by nothing before this check.
+        #
+        # This used to be `mutate("cap: 10", "cap: 1")` against VALID, and
+        # it cannot be any more: `unopened` is now accepting, and it is also
+        # `initial`, so VALID's shortest signalling run to an accepting
+        # state is zero transitions long and *every* positive cap satisfies
+        # it. That is the correct answer under the accepting-state model --
+        # a session-relay run may legitimately stop before filing anything,
+        # having emitted nothing -- but it means VALID no longer exercises
+        # this check at all, so the check needs a machine of its own.
+        m = _linear_machine(cap=1)
         problems = check_machine(m)
         self.assertTrue(any("cap 1" in p for p in problems), problems)
 
@@ -166,8 +177,15 @@ class TestChecksNoTaskOwned(unittest.TestCase):
         # The boundary, in the direction that matters: a cap of 2 permits
         # the two-transition run, so it must not be reported. An off-by-one
         # here would reject machines that are perfectly runnable.
-        m = mutate("cap: 10", "cap: 2")
-        self.assertEqual(check_machine(m), [])
+        self.assertEqual(check_machine(_linear_machine(cap=2)), [])
+
+    def test_an_accepting_initial_state_satisfies_every_cap(self):
+        # The consequence of the line above, pinned rather than left
+        # implicit: a machine whose initial state is accepting can stop
+        # having emitted nothing, so no positive cap can be too small for
+        # it. VALID is exactly that machine now.
+        m = mutate("cap: 10", "cap: 1")
+        self.assertEqual([p for p in check_machine(m) if "cap" in p], [])
 
     def test_local_moves_on_the_shortest_run_do_not_count_against_the_cap(self):
         # The re-reviewer's own machine: two purely-local moves
@@ -184,7 +202,7 @@ class TestChecksNoTaskOwned(unittest.TestCase):
                 "start": State("start"),
                 "middle": State("middle"),
                 "late": State("late"),
-                "done": State("done", terminal=True),
+                "done": State("done", terminal=True, accepting=True),
             },
             [
                 Transition("start", "step1", "role", "middle", signal=False),
@@ -206,7 +224,7 @@ class TestChecksNoTaskOwned(unittest.TestCase):
             {
                 "start": State("start"),
                 "middle": State("middle"),
-                "done": State("done", terminal=True),
+                "done": State("done", terminal=True, accepting=True),
             },
             [
                 Transition("start", "step1", "role", "middle", signal=True),
@@ -223,6 +241,247 @@ class TestChecksNoTaskOwned(unittest.TestCase):
                    "kinds: [triage, question, answer, conclusion, stalemate, shouting]")
         problems = check_machine(m)
         self.assertTrue(any("'shouting'" in p for p in problems), problems)
+
+
+class TestAcceptingStates(unittest.TestCase):
+    """Accepting is not terminal, and the checks that tell them apart.
+
+    Cycle A shipped a schema that required `cap`, required at least one
+    *terminal* state, and required every state to reach one -- which bakes
+    "a protocol terminates" into the framework as a law. It is not one. It
+    is a property of some protocols, and requiring it forces an author with
+    a continuous protocol to declare a bound they do not mean, which is the
+    exact failure this framework exists to answer.
+
+    **Accepting** means nothing further is *required*: it is fine for the
+    conversation to stop here. **Terminal** means nothing further is
+    *possible*. The two are independent, and all four combinations are
+    legal:
+
+    - accepting and terminal -- `concluded`. Done, and nothing was left owed.
+    - accepting, not terminal -- a responder sitting idle, willing to answer
+      another question but owing nobody anything. The gossip shape.
+    - neither -- a session that has just sent a message and is waiting for
+      the reply. Something is owed and the conversation can continue.
+    - **terminal and not accepting** -- an error state. The conversation
+      ended while something was still owed, *and that is the point of
+      reaching it*: an abort, a protocol violation, a peer that went away.
+      The machine stops, the effects notify the peers, and the fact that
+      the conversation was unfinished is exactly what is being reported.
+
+    That fourth row is the one this class exists to protect. An earlier
+    draft of these checks required every terminal state to be accepting,
+    which would have forbidden the most useful error state a protocol can
+    have.
+    """
+
+    def test_a_machine_with_no_accepting_state_is_reported(self):
+        # Assert the *specific* message, not merely the word "accepting".
+        # The predecessor of this test (against `terminal`) was shown to
+        # pass with the check under test deleted outright, because the
+        # per-state reachability messages contain the same word. A test a
+        # deleted check still satisfies is not testing that check.
+        m = parse(VALID)
+        for s in m.states.values():
+            s.accepting = False
+        problems = check_machine(m)
+        self.assertTrue(any("no state is accepting" in p for p in problems))
+        # And exactly that, once. Every state can still reach a terminal
+        # state, so the reachability check has nothing to say -- the
+        # cascade its `terminal`-era predecessor produced (one message per
+        # state on top of the real finding) does not happen here.
+        self.assertEqual(len(problems), 1, problems)
+
+    def test_a_branch_whose_every_future_ends_badly_is_deliberately_not_reported(self):
+        # `doomed` is non-accepting and its only future is `aborted`, which
+        # is terminal and non-accepting. Entering `doomed` commits the run
+        # to ending with something still owed.
+        #
+        # That is legal, on purpose, and this test pins the decision rather
+        # than the absence of a thought. The checker cannot tell a bug from
+        # a correctly-modelled doomed branch -- "once the versions are
+        # incompatible, every route aborts" is a true thing to declare --
+        # and there is no field with which an author could say "yes, I mean
+        # it". An unsuppressible complaint about a valid machine is worse
+        # than a missing one. Recorded as an open question in the design
+        # spec, not decided here.
+        m = Machine(
+            "doomed-branch", "v1", "x",
+            {"role": "party"}, {"fork", "fail"}, None,
+            "idle",
+            {
+                "idle": State("idle", holder="role", accepting=True),
+                "doomed": State("doomed", holder="role"),
+                "aborted": State("aborted", terminal=True),
+            },
+            [
+                Transition("idle", "fork", "role", "doomed", signal=True),
+                Transition("doomed", "fail", "role", "aborted", signal=True,
+                           effects=["escalate"]),
+            ],
+        )
+        self.assertEqual(check_machine(m), [])
+
+    def test_a_state_owed_something_with_no_way_to_stop_at_all_is_reported(self):
+        # Remove both exits from awaiting-triage, leaving awaiting-triage
+        # and awaiting-answer trading messages forever with no route to
+        # anywhere a run may stop -- not to an accepting state, and not to
+        # a terminal one either. Being owed something forever with no exit
+        # is the property this check protects.
+        m = parse(VALID)
+        m.transitions = [t for t in m.transitions
+                         if t.on not in ("conclusion", "stalemate")]
+        problems = check_machine(m)
+        self.assertTrue(
+            any("awaiting-triage" in p and "cannot reach a state where a run "
+                "may stop" in p for p in problems), problems)
+        self.assertTrue(
+            any("awaiting-answer" in p and "cannot reach a state where a run "
+                "may stop" in p for p in problems), problems)
+
+    def test_an_accepting_state_needs_no_path_to_anywhere(self):
+        # The other direction of the same check: an accepting state is
+        # already somewhere a run may stop, so it owes no path onward. A
+        # check that flooded backwards and then complained about every
+        # state outside the flood would report the seeds themselves.
+        m = parse(VALID)
+        self.assertEqual(
+            [p for p in check_machine(m) if "may stop" in p], [])
+
+    def test_a_terminal_state_that_is_not_accepting_is_legal(self):
+        # The error state. `stalled` is terminal and not accepting: the
+        # thread stops with the initiator's question unanswered, the label
+        # is swapped and a human is escalated to. Something is still owed
+        # -- by a person, outside the machine -- and saying so is the whole
+        # purpose of the state.
+        #
+        # This is asserted against the shipped fixture rather than a
+        # hand-built machine because it is the fixture's own shape, and
+        # because a check requiring terminal states to be accepting would
+        # reject `session-relay` itself.
+        m = parse(VALID)
+        self.assertTrue(m.states["stalled"].terminal)
+        self.assertFalse(m.states["stalled"].accepting)
+        self.assertEqual(check_machine(m), [])
+
+    def test_a_terminal_non_accepting_state_is_not_asked_to_reach_anything(self):
+        # Directly, on a machine that is nothing but the abort: a terminal
+        # non-accepting state can reach nothing at all, by definition, so
+        # a reachability check that did not exempt it would report every
+        # error state in every protocol as a defect.
+        m = Machine(
+            "abort-test", "v1", "x",
+            {"role": "party"}, {"go", "give-up"}, None,
+            "idle",
+            {
+                "idle": State("idle", holder="role", accepting=True),
+                "aborted": State("aborted", terminal=True),
+            },
+            [
+                Transition("idle", "go", "role", "idle", signal=True),
+                Transition("idle", "give-up", "role", "aborted", signal=True,
+                           effects=["escalate"]),
+            ],
+        )
+        self.assertEqual(check_machine(m), [])
+
+    def test_a_machine_with_no_cap_at_all_passes_every_check(self):
+        # The case this change exists to permit, pinned so it cannot be
+        # taken away again by accident: a protocol that declares no bound.
+        # `cap` is absent, not zero and not a sentinel, and nothing here
+        # reports it.
+        m = Machine(
+            "uncapped", "v1", "x",
+            {"role": "party"}, {"ping"}, None,
+            "idle",
+            {"idle": State("idle", holder="role", accepting=True)},
+            [Transition("idle", "ping", "role", "idle", signal=True)],
+        )
+        self.assertEqual(check_machine(m), [])
+
+    def test_the_cap_check_is_skipped_entirely_when_cap_is_absent(self):
+        # Not merely "an uncapped machine happens to pass": the machine
+        # here is one that *would* fail the cap check for any cap under 2,
+        # and with no cap declared there is nothing to compare against.
+        m = _linear_machine(cap=None)
+        self.assertEqual([p for p in check_machine(m) if "cap" in p], [])
+
+    def test_a_machine_that_is_entirely_accepting_and_never_terminates_passes(self):
+        # The gossip shape. Every state is accepting: at any moment it is
+        # fine for the conversation to stop, and it is equally fine for
+        # another message to arrive. No state is terminal, because nothing
+        # ever makes a further message impossible. Cycle A rejected this
+        # machine outright ("no state is terminal; the machine cannot
+        # terminate") even though there is nothing wrong with it.
+        m = Machine(
+            "gossip", "v1", "x",
+            {"peer": "session"}, {"rumour", "ack"}, None,
+            "idle",
+            {
+                "idle": State("idle", holder="peer", accepting=True),
+                "informed": State("informed", holder="peer", accepting=True),
+            },
+            [
+                Transition("idle", "rumour", "peer", "informed", signal=True),
+                Transition("informed", "rumour", "peer", "informed", signal=True),
+                Transition("informed", "ack", "peer", "idle", signal=True),
+            ],
+        )
+        problems = check_machine(m)
+        self.assertEqual(problems, [])
+        self.assertEqual([s for s in m.states.values() if s.terminal], [])
+
+    def test_a_cap_too_small_for_the_shortest_run_to_an_accepting_state_is_reported(self):
+        # The cap check re-targeted: the goal set is the accepting states,
+        # not the terminal ones. Here `done` is accepting and *not*
+        # terminal -- it has an outgoing transition -- so a check still
+        # measuring to terminal states would find no goal at all and report
+        # nothing, which is the failure this test exists to catch.
+        m = Machine(
+            "recap", "v1", "x",
+            {"role": "party"}, {"a", "b", "c"}, 1,
+            "start",
+            {
+                "start": State("start", holder="role"),
+                "middle": State("middle", holder="role"),
+                "done": State("done", holder="role", accepting=True),
+            },
+            [
+                Transition("start", "a", "role", "middle", signal=True),
+                Transition("middle", "b", "role", "done", signal=True),
+                Transition("done", "c", "role", "start", signal=True),
+            ],
+        )
+        problems = check_machine(m)
+        cap_problems = [p for p in problems if "cap" in p]
+        self.assertEqual(len(cap_problems), 1, problems)
+        self.assertIn("2 signalling transitions", cap_problems[0])
+        self.assertIn("accepting state", cap_problems[0])
+
+    def test_local_moves_are_still_free_on_the_way_to_an_accepting_state(self):
+        # Re-targeting the goal set must not have disturbed the 0-1 BFS
+        # weighting underneath it: a `signal: false` edge still costs
+        # nothing, so this three-transition run costs 1 and cap 1 accepts
+        # it. Asserted against an accepting, non-terminal goal, which the
+        # pre-change check could not have reached.
+        m = Machine(
+            "free-moves", "v1", "x",
+            {"role": "party"}, {"a", "b", "c", "d"}, 1,
+            "start",
+            {
+                "start": State("start", holder="role"),
+                "middle": State("middle", holder="role"),
+                "late": State("late", holder="role"),
+                "done": State("done", holder="role", accepting=True),
+            },
+            [
+                Transition("start", "a", "role", "middle", signal=False),
+                Transition("middle", "b", "role", "late", signal=False),
+                Transition("late", "c", "role", "done", signal=True),
+                Transition("done", "d", "role", "start", signal=True),
+            ],
+        )
+        self.assertEqual(check_machine(m), [])
 
 
 if __name__ == "__main__":

@@ -35,10 +35,10 @@ kinds: [triage, question, answer, conclusion, stalemate]
 cap: 10
 initial: unopened
 states:
-  - { name: unopened, holder: initiator }
+  - { name: unopened, holder: initiator, accepting: true }
   - { name: awaiting-triage, holder: responder }
   - { name: awaiting-answer, holder: initiator }
-  - { name: concluded, terminal: true }
+  - { name: concluded, terminal: true, accepting: true }
   - { name: stalled, terminal: true }
 transitions:
   - { from: unopened, on: triage, by: initiator, to: awaiting-triage, signal: true,
@@ -79,6 +79,46 @@ class TestParse(unittest.TestCase):
         self.assertTrue(m.states["concluded"].terminal)
         self.assertFalse(m.states["awaiting-triage"].terminal)
 
+    def test_accepting_is_parsed_and_defaults_to_false(self):
+        # The default is the conservative one on purpose: an author who
+        # declares nothing accepting gets a machine the checker rejects,
+        # rather than one where stopping anywhere is silently fine.
+        m = parse(VALID)
+        self.assertTrue(m.states["unopened"].accepting)
+        self.assertTrue(m.states["concluded"].accepting)
+        self.assertFalse(m.states["awaiting-triage"].accepting)
+        self.assertFalse(m.states["awaiting-answer"].accepting)
+
+    def test_accepting_and_terminal_are_independent(self):
+        # `stalled` carries `terminal: true` and no `accepting`, and comes
+        # back terminal and not accepting. A parser that derived one from
+        # the other would flatten the fixture's error state into an
+        # ordinary conclusion.
+        m = parse(VALID)
+        self.assertTrue(m.states["stalled"].terminal)
+        self.assertFalse(m.states["stalled"].accepting)
+
+    def test_accepting_must_be_an_actual_boolean(self):
+        # Same hazard as `terminal` and `signal`: with the resolver
+        # narrowed, `accepting: yes` is the string "yes", and Python
+        # truthiness would happily make that True.
+        for written in ("yes", "1", '"true"'):
+            with self.subTest(written=written):
+                bad = VALID.replace(
+                    "- { name: unopened, holder: initiator, accepting: true }",
+                    "- { name: unopened, holder: initiator, accepting: %s }" % written)
+                with self.assertRaises(DeclarationError) as ctx:
+                    parse(bad)
+                self.assertEqual(ctx.exception.field, "accepting")
+
+    def test_cap_may_be_absent_entirely(self):
+        # The field is optional, and absent means "this protocol declares
+        # no bound" -- not zero, not a sentinel, not a default the author
+        # never asked for. A protocol with no reason to terminate must be
+        # able to say nothing about a cap rather than invent one.
+        m = parse(VALID.replace("cap: 10\n", ""))
+        self.assertIsNone(m.cap)
+
     def test_unknown_top_level_field_raises_and_names_it(self):
         bad = VALID.replace("cap: 10", "cap: 10\ncaps: 12")
         with self.assertRaises(DeclarationError) as ctx:
@@ -86,19 +126,26 @@ class TestParse(unittest.TestCase):
         self.assertEqual(ctx.exception.field, "caps")
 
     def test_missing_required_field_raises_and_names_it(self):
-        bad = VALID.replace("cap: 10\n", "")
+        # `initial`, not `cap`: `cap` became optional when the framework
+        # stopped requiring protocols to terminate, so its absence is no
+        # longer a missing-field error and cannot stand in for one here.
+        bad = VALID.replace("initial: unopened\n", "")
         with self.assertRaises(DeclarationError) as ctx:
             parse(bad)
-        self.assertEqual(ctx.exception.field, "cap")
+        self.assertEqual(ctx.exception.field, "initial")
 
-    def test_cap_must_be_a_positive_integer(self):
+    def test_cap_when_present_must_be_a_positive_integer(self):
+        # Optional does not mean unvalidated. Every one of these is a
+        # written cap, and none of them is a count.
         for value in ("0", "-1", '"ten"', "true", "false"):
-            with self.assertRaises(DeclarationError):
-                parse(VALID.replace("cap: 10", "cap: " + value))
+            with self.subTest(value=value):
+                with self.assertRaises(DeclarationError) as ctx:
+                    parse(VALID.replace("cap: 10", "cap: " + value))
+                self.assertEqual(ctx.exception.field, "cap")
 
     def test_duplicate_state_name_raises(self):
         bad = VALID.replace(
-            "- { name: concluded, terminal: true }",
+            "- { name: concluded, terminal: true, accepting: true }",
             "- { name: awaiting-triage, terminal: true }",
         )
         with self.assertRaises(DeclarationError):
@@ -158,10 +205,10 @@ class TestBooleanTokenWordsStayStrings(unittest.TestCase):
 
 
 _STATES_BLOCK = """states:
-  - { name: unopened, holder: initiator }
+  - { name: unopened, holder: initiator, accepting: true }
   - { name: awaiting-triage, holder: responder }
   - { name: awaiting-answer, holder: initiator }
-  - { name: concluded, terminal: true }
+  - { name: concluded, terminal: true, accepting: true }
   - { name: stalled, terminal: true }
 """
 

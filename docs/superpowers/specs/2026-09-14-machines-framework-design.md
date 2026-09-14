@@ -91,24 +91,57 @@ item 1.
 | Layer | Holds | Checked by |
 |---|---|---|
 | **Channel** | which channel, who holds it, who acts next | linearity |
-| **Protocol** | states, legal kinds per state, the cap, terminal states | product construction, at install |
+| **Protocol** | states, legal kinds per state, which states accept, which states are terminal, an optional cap | product construction, at install |
 | **Content** | the message body | **nothing, deliberately** |
 
 The third row is the point. The framework holds no content, so it can never *appear* to
 verify content. A machine that looked like it checked meaning would be worse than prose,
 because a reader would believe the semantic rules were verified.
 
-**Checkable:** alternation, the legal kinds in each state, the cap, termination, which
-role acts next. **Not checkable:** whether a draft states a new fact, and whether a sender
-set a flag honestly.
+**Checkable:** alternation, the legal kinds in each state, a declared cap, whether a run can
+always reach somewhere it may legitimately stop, which role acts next. **Not checkable:**
+whether a draft states a new fact, whether a sender set a flag honestly, and — see §7 —
+**whether the protocol terminates, which is not a property the framework requires.**
+
+### Accepting is not terminal, and termination is not required
+
+An earlier statement of this design, and cycle A's first implementation of it, required every
+machine to declare a `cap`, to have at least one terminal state, and to be able to reach one
+from everywhere. That writes *"a protocol terminates"* into the framework as a law. **It is
+not one.** Termination is a property of some protocols and not of others, and requiring it of
+an author whose protocol is continuous forces them to declare a bound they do not mean — **a
+declared bound nobody believes, which is the exact failure this framework exists to answer
+(`claude-operating-rules#17`).**
+
+The schema separates two properties instead:
+
+- **Accepting** — nothing further is *required*. It is fine for the conversation to stop
+  here, because nothing is owed.
+- **Terminal** — nothing further is *possible*. No transition leaves.
+
+They are independent, and all four combinations mean something. A conclusion is both. An idle
+responder — *"it would be fine to send messages and it could also respond, but as long as
+it's only answering questions, this would only be self transitions on an accepting state"* —
+is accepting and not terminal. A session that has sent a message and waits for the reply —
+*"this is clearly an unfinished conversation"* — is neither. And **terminal without accepting
+is an error state**: an abort, a protocol violation, a peer that went away. The conversation
+ended while something was still owed *and that is the point of reaching it*; the effects
+notify the peers and a human picks it up. Forbidding that combination — which a first draft of
+this correction did — would forbid the most useful error state a protocol can have.
+
+What the checker protects instead is that **nobody is ever owed something forever with no
+exit**: at least one state must be accepting, and every state must be able to reach an
+accepting or a terminal state. Stopping badly is an exit. Stopping badly on purpose, with
+effects that tell the peers, is a protocol doing its job.
 
 ## 5. Layout
 
 ```
 ~/.claude-machine/
   machines/<publisher>/<name>/<version>/
-      machine.yaml        closed data — states, roles, kinds, transitions,
-                          cap, terminal states, effects
+      machine.yaml        closed data — states (accepting, terminal, both or
+                          neither), roles, kinds, transitions, an optional
+                          cap, effects
       transport/          the PUBLISHER'S CODE — only the verbs it declares
       SKILL.md            the prose, carrying the machine in a fenced block
   registry.json           prefixes → machines, and the last conflict verdict
@@ -179,9 +212,9 @@ place it can be checked.
 
 ## 7. The declaration
 
-**Closed language.** States, roles, message kinds, transitions, one declared cap, terminal
-states, and effects that **name verbs the transport declares**. **No expressions, no scripts,
-no callbacks.**
+**Closed language.** States — each of which may be *accepting*, *terminal*, both or neither —
+roles, message kinds, transitions, an optional cap, and effects that **name verbs the
+transport declares**. **No expressions, no scripts, no callbacks.**
 
 The closure is load-bearing twice over, and this is the design's central observation:
 
@@ -193,11 +226,19 @@ The closure is load-bearing twice over, and this is the design's central observa
 
 **The decidability limit and the trust limit are the same limit.** One restriction buys both.
 
-**The cap** is declared per bundle and **counts only the outbound messages the machine
-emits** — that is, only transitions that signal. A purely local move does not count against it,
-and neither does a comment the machine did not emit; `session-relay`'s "ten comments per sender
-per issue" is one machine's choice of value, not the framework's rule. This wording was
-ambiguous until cycle A had to implement it — see §11, item 6.
+**The cap** is declared per bundle, is **optional**, and **counts only the outbound messages
+the machine emits** — that is, only transitions that signal. A purely local move does not
+count against it, and neither does a comment the machine did not emit; `session-relay`'s "ten
+comments per sender per issue" is one machine's choice of value, not the framework's rule.
+This wording was ambiguous until cycle A had to implement it — see §11, item 6.
+
+**Omitting `cap` means the protocol declares no bound**, and nothing substitutes a default:
+the checker skips cap satisfiability entirely rather than measuring the machine against a
+number the publisher never wrote. A continuous protocol has no bound to state, and making it
+state one would produce exactly the unbelieved number this framework exists to prevent. When
+a cap *is* written, it is checked against the shortest signalling run from `initial` to an
+**accepting** state — not to a terminal one, because the question a budget answers is whether
+it suffices to get somewhere good, and an abort is not somewhere good.
 
 **Placement:** a fenced block inside the bundle's `SKILL.md`, beside the prose that explains
 it — one file, edited in one act, reviewed in one diff. A cap that says ten in the machine
@@ -398,7 +439,13 @@ it found a defect nothing predicted — which is the outcome it was written to p
   kind `triage` with no transition firing on it, because the triage message *is* the issue
   body. Cycle A models it instead with an explicit `unopened` state held by the initiator and
   a `triage` transition out of it, which is arguably more honest than the prose it replaces:
-  filing the issue is an act someone takes, not a state the world is in.
+  filing the issue is an act someone takes, not a state the world is in. **`unopened` is
+  accepting** — before anything is filed nobody has been told anything and nothing is owed —
+  and because it is also `initial`, `session-relay`'s shortest signalling run to an accepting
+  state is zero transitions long, so its `cap: 10` is no longer compared against anything. That
+  is the correct answer under the accepting-state model rather than a hole, but it means the
+  shipped fixture stopped exercising the cap check and a machine of its own had to take over
+  that job in the tests.
 - **Row 7 is not expressible in the declaration, and correctly so.** That is what the
   subsection above already argues — the comparison is a value the *engine* produces, not a
   rule the declaration encodes — and nothing on this branch claims otherwise. Cycle B is where
@@ -407,13 +454,25 @@ it found a defect nothing predicted — which is the outcome it was written to p
 
 **What the schema cannot express, which is cycle B's input:**
 
-- a cap scoped per sender or per channel — the declared cap is one number for a run;
+- a cap scoped per sender or per channel — a declared cap is one number for a run, and a
+  machine may now decline to declare one at all;
 - any message attribute beyond `kind`, so `blocking=`, `seq=` and `ref=` are invisible to it;
 - a guard on a transition;
 - an epsilon or otherwise internal move;
 - an initial state that is the channel's creation;
 - an effect attached to a state rather than to a transition;
-- a machine identity qualified by publisher.
+- a machine identity qualified by publisher;
+- **an obligation, as anything a checker could derive.** `accepting` says whether anything is
+  owed in a state, and it is a *declared assertion* — the checker cannot cross-check it
+  against anything, the way it cross-checks `terminal` against the state's out-degree and
+  `holder` against each outgoing `by`. An author who marks a waiting state accepting gets a
+  clean run. The conservative default (`false`) is what makes that a loud failure rather than
+  a quiet one in the common case, but it is a default, not a check.
+- **"every route from here ends badly."** A non-accepting state whose every future is a
+  terminal non-accepting state is legal, on purpose. It is also a true thing to declare — *once
+  the versions are incompatible, every route aborts* — and the schema has no field with which
+  an author could confirm they meant it, so a complaint would be an unsuppressible false
+  positive on a valid machine. Left open deliberately; see §11, item 8.
 
 ### What the backport cannot test
 
@@ -450,6 +509,24 @@ that delegation works.**
 7. **Where prefix validation lives.** It is in `check_all` rather than in `check_machine`.
    `check_machine` is the tidier home — a prefix that will not compile is a property of one
    machine, not of a set — and the move is deferred to cycle B.
+8. **Whether a branch whose every future ends badly should be reported.** A non-accepting
+   state that can reach only terminal non-accepting states commits the run, on entry, to
+   ending with something still owed. Sometimes that is a bug; sometimes it is a correctly
+   modelled doomed branch. **Not implemented, and not decided by the session that raised it.**
+   The argument against a check: it is unsuppressible — there is no field with which an author
+   could say "yes, I mean it" — so every correctly-declared doomed branch would be reported as
+   a defect, and an unsuppressible false positive on a valid machine is worse than a missing
+   finding. The argument for: the shape is genuinely suspicious and nothing else catches it.
+   If the checker ever grows a non-fatal tier (it has one severity today — a problem, exit 1),
+   this is the first thing that belongs in it.
+9. **`accepting` is a declared assertion with no structural cross-check.** `terminal` is
+   cross-checked against a state's out-degree and `holder` against each outgoing `by`;
+   `accepting` is cross-checked against nothing, because "is anything owed here" is not a
+   graph property. An author who marks a waiting state accepting passes every check. The
+   conservative default makes the *common* mistake (marking nothing) loud; it does nothing
+   about the *deliberate* one. Whether a heuristic is worth having — a state whose outgoing
+   transitions are all `by` a role other than its own `holder` is where waiting happens — is
+   untested and unproposed.
 
 ## 12. A protocol negotiator, in three stages
 
@@ -460,8 +537,10 @@ alone and de-risks the next.
 itself a protocol, so a floor has to exist that nobody negotiates. The floor already exists —
 the dispatcher, the prefix, and *"no machine claims this"*. The negotiator is **a declared
 machine shipped built-in, with a fixed prefix, always installed, never negotiated.** It gets a
-cap, terminal states and a termination proof from the same checker as everything else: a
-negotiation that cannot terminate is caught by the machinery it negotiates with.
+checked by the same checker as everything else. **A negotiator is one of the protocols that
+genuinely should terminate**, so it declares a cap and a terminal state and the checker holds
+it to them — but it does so because the negotiator's own declaration says so, not because the
+framework requires it of every machine (§4).
 
 ### Stage 1 — the offer (folds into cycle D; cheap)
 
@@ -502,7 +581,7 @@ grammar the checker validates.
 | Who | Does |
 |---|---|
 | the sessions | the creative part — what states, what kinds, what the protocol should be |
-| the checker | the deterministic part — well-formedness, termination, cap, prefix collision |
+| the checker | the deterministic part — well-formedness, that a run can always reach somewhere it may stop, a declared cap, prefix collision |
 | the person | the authorising part — adoption |
 
 Nothing is adopted because two sessions agreed it was fine.

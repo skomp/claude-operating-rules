@@ -1,11 +1,11 @@
 import re
 import yaml
 from .errors import DeclarationError
-from .machine import REQUIRED, Machine, State, Transition
+from .machine import FIELDS, REQUIRED, Machine, State, Transition
 
 _FENCE = re.compile(r"^```machine[ \t]*\n(.*?)^```[ \t]*$", re.MULTILINE | re.DOTALL)
 
-_STATE_KEYS = {"name", "holder", "terminal"}
+_STATE_KEYS = {"name", "holder", "terminal", "accepting"}
 _TRANSITION_KEYS = {"from", "on", "by", "to", "signal", "effects"}
 
 
@@ -60,7 +60,7 @@ def parse(text):
         raise DeclarationError("a machine block must be a mapping")
 
     for key in data:
-        if key not in REQUIRED:
+        if key not in FIELDS:
             raise DeclarationError("unknown field %r" % key, field=key)
     for key in REQUIRED:
         if key not in data:
@@ -71,9 +71,17 @@ def parse(text):
 
     _require_prefix_length(data["prefix"])
 
-    cap = data["cap"]
-    if not isinstance(cap, int) or isinstance(cap, bool) or cap < 1:
-        raise DeclarationError("cap must be a positive integer", field="cap")
+    # `cap` is optional, and its absence is meaningful: this protocol
+    # declares no bound. No default is substituted -- a cap the publisher
+    # did not write is a bound nobody agreed to, and `check_machine` skips
+    # the satisfiability check outright rather than measuring against an
+    # invented number. Optional is not unvalidated, though: a cap that *is*
+    # written must be a real count, and must not be a bool (Python
+    # considers `True` an `int`, so `cap: true` would otherwise land as 1).
+    cap = data.get("cap")
+    if cap is not None:
+        if not isinstance(cap, int) or isinstance(cap, bool) or cap < 1:
+            raise DeclarationError("cap must be a positive integer", field="cap")
 
     kinds = data["kinds"]
     if not isinstance(kinds, list):
@@ -107,7 +115,8 @@ def parse(text):
         if holder is not None:
             _require_string(holder, "holder", "a states entry's ")
         states[name] = State(name, holder,
-                              _bool_field(raw, "terminal", False))
+                              _bool_field(raw, "terminal", False),
+                              _bool_field(raw, "accepting", False))
 
     transitions = []
     for raw in raw_transitions:

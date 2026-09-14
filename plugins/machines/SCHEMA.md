@@ -8,7 +8,9 @@ silently ignored: a publisher who writes `caps: 10` is told about `caps`, not ha
 with a default cap they never asked for.
 
 Every field in this document is required unless its section says otherwise. A required
-field that is missing is rejected by name, the same as an unknown one.
+field that is missing is rejected by name, the same as an unknown one. **`cap` is the one
+top-level field that is optional**, and its absence means something: this protocol declares
+no bound.
 
 **Every type in this document is enforced, and every failure names the field.** A field
 documented as a string must be a string; `roles` must be a mapping; each `states` and
@@ -33,7 +35,7 @@ crash: coherent-looking data that is simply wrong.
 everywhere in the declaration.** `yes`, `no`, `on` and `off` are always strings here,
 whatever position they appear in. **The cost:** `signal: yes` no longer means `signal: true`
 — a publisher who wants the boolean must write `true` or `false` literally. The parser
-enforces this too: `signal` and `terminal` reject anything that isn't an actual boolean
+enforces this too: `signal`, `terminal` and `accepting` reject anything that isn't an actual boolean
 (so `signal: yes` fails loudly as the string `"yes"` in a boolean field, rather than being
 accepted as truthy).
 
@@ -165,29 +167,52 @@ otherwise do with no error at all.
 
 ## `cap`
 
-**Type:** integer, and it must be a *positive* integer — `0`, a negative number, and a
-non-integer (including a quoted string) are all rejected. **Required.**
+**Type:** integer, and when written it must be a *positive* integer — `0`, a negative
+number, and a non-integer (including a quoted string) are all rejected. **Optional.** It is
+the one top-level field a declaration may leave out.
 
 The transition cap: the maximum number of outbound messages this machine's engine will ever
 emit for one run. It caps outbound messages, not transitions and not comments — a purely
 local move (`signal: false`) is not an outbound message, so it does not count against `cap`
 even though it is a transition; and a bundle's "ten comments per sender" rule is that
-bundle's choice of value, not the framework's. This is the field that makes termination
-checkable at all: a machine that can run forever is exactly a machine with no enforced cap
-and no path to a terminal state, so `cap` has to exist, has to be a real count, and cannot
-be disguised as `true` (which is why the parser rejects a boolean here even though Python
-considers `True` an `int`).
+bundle's choice of value, not the framework's. A cap cannot be disguised as `true`: the
+parser rejects a boolean here even though Python considers `True` an `int`.
 
-**The cap is compared to the machine, not just validated on its own.** `check_machine`
-measures the shortest run from `initial` to a terminal state and counts only that run's
-`signal: true` transitions — a `signal: false` transition costs nothing, because it emits
-no message a peer ever sees — then reports a cap smaller than that count: a machine
-declared both to terminate and to exhaust its signalling budget before it can is a machine
-that cannot legally finish. A cap that is merely generous is not reported — only one no run
-can satisfy. Because a local move is free, the "shortest run" the check optimizes for is the
-one with the fewest *signalling* transitions, not the fewest transitions of any kind — a run
-that takes a long detour through local moves and fires only one signal is cheaper, for this
-purpose, than a two-hop run that signals twice.
+**A protocol needs no cap, and this framework does not require one.** Leaving `cap` out
+means exactly one thing — *this protocol declares no bound on how many messages a run may
+emit* — and it is the honest declaration for any protocol that has no reason to stop. There
+is no default. Nothing substitutes a number the publisher did not write, and
+`check_machine` skips the satisfiability check below entirely rather than measuring the
+machine against an invented bound.
+
+That is deliberate, and it is a correction. An earlier version of this schema required
+`cap`, on the reasoning that a cap is what makes termination checkable and termination is
+what a protocol owes. Both halves were wrong. Termination is a property of *some* protocols,
+not a law of protocols, and requiring a bound of an author who has none forces them to write
+a number nobody believes. **A declared bound nobody believes is the failure this framework
+exists to answer, not one it should cause.**
+
+**When a cap is written, it is compared to the machine, not just validated on its own.**
+`check_machine` measures the shortest run from `initial` to an **accepting** state — see the
+next section — and counts only that run's `signal: true` transitions, a `signal: false`
+transition costing nothing because it emits no message a peer ever sees. A cap smaller than
+that count is reported: the machine is declared both to have a budget and to be unable to
+reach a point where nothing is owed inside it. A cap that is merely generous is not reported
+— only one no run can satisfy. Because a local move is free, the "shortest run" the check
+optimizes for is the one with the fewest *signalling* transitions, not the fewest
+transitions of any kind — a run that takes a long detour through local moves and fires only
+one signal is cheaper, for this purpose, than a two-hop run that signals twice.
+
+The goal is an accepting state and not a terminal one, and not either-or: the question a cap
+answers is whether the budget suffices to get somewhere *good*, and an abort is not somewhere
+good. A cap that only reaches the error state is a cap that cannot be satisfied.
+
+**One consequence, stated rather than left to be discovered.** When `initial` is itself
+accepting — as `session-relay`'s `unopened` is — the shortest run to an accepting state is
+zero transitions long, and no positive cap can be too small. That is the correct answer: a
+run that may legitimately stop before saying anything has emitted nothing, and nothing fits
+in any budget. But it does mean this check has nothing to say about a machine of that shape,
+and a generous-looking cap on one has not been validated against anything.
 
 ## `initial`
 
@@ -196,6 +221,53 @@ purpose, than a two-hop run that signals twice.
 The name of the state a run starts in. `check_machine` checks that this names a state actually
 declared under `states` below — a publisher who mistypes it would otherwise get a machine
 that can never legally start.
+
+## Accepting is not terminal
+
+Two properties of a state, easy to conflate, and the schema keeps them apart because they
+answer different questions.
+
+**Accepting means nothing further is *required*.** It is fine for the conversation to stop
+here, because nothing is owed to anybody.
+
+**Terminal means nothing further is *possible*.** No transition leaves the state.
+
+The example that makes it land: *I sent a message to session B and I am now waiting for a
+response.* That is clearly an unfinished conversation — my state is **not accepting**,
+because something is owed and the conversation stopping there would leave it hanging. On the
+other side, session B is in an accepting state the whole time. It would be fine for messages
+to arrive and it could also respond, but as long as it is only answering questions it owes
+nothing at any point, and those answers are **self-transitions on an accepting state**.
+
+All four combinations are legal and all four mean something:
+
+| | `terminal: true` | `terminal: false` |
+|---|---|---|
+| **`accepting: true`** | A conclusion. `session-relay`'s `concluded`: done, and nothing was left owed. | The idle responder above. Willing to answer another question, owing nobody anything. A machine made entirely of these never terminates and is perfectly well-formed. |
+| **`accepting: false`** | **An error state.** An abort, a protocol violation, a peer that went away. The conversation ended *while something was still owed, and that is the point of reaching it* — the effects notify the peers and a human picks it up. `session-relay`'s `stalled`. | Waiting for a reply. Something is owed and the conversation can still continue. |
+
+**A protocol does not have to terminate.** A machine with no terminal state at all is
+well-formed, provided at least one state is accepting. A continuous protocol — two sessions
+gossiping indefinitely, a watcher that reports whenever it has something to report — is a
+real protocol, and nothing here asks it to invent an ending.
+
+What the checker does insist on, which is the property worth protecting, is that **nobody is
+ever owed something forever with no exit**:
+
+- **At least one state must be accepting.** A protocol with nowhere the conversation may rest
+  is never in a good state. (The default for `accepting` is `false`, so this is what a
+  declaration that marks nothing accepting runs into — loudly, by name, rather than silently
+  getting a machine where stopping anywhere is fine.)
+- **Every state must be able to reach somewhere a run may legitimately stop** — an accepting
+  state *or* a terminal one. Stopping badly is still an exit. Terminal states are exempt as
+  subjects of this check, because they can reach nothing at all by construction; a terminal
+  state *is* one of the places a run may stop.
+
+**What the checker does not insist on, deliberately:** that every route leads somewhere good.
+A non-accepting state whose every future ends in a terminal non-accepting state — a doomed
+branch, "once the versions are incompatible, every route aborts" — is accepted. It is a true
+thing to declare, there is no field with which an author could confirm they meant it, and an
+unsuppressible complaint about a valid machine would be worse than a missing one.
 
 ## `states`
 
@@ -216,14 +288,25 @@ Each entry is a state, with these fields:
   is in this state. Checked against `roles` above, and against the `by` of every transition
   out of this state: `holder` and `by` both say who acts next, so a state held by one role
   whose only exits are taken by another is reported.
-- **`terminal`** (boolean, optional, default: `false`) — whether a run may legitimately end
-  here. `check_machine` checks that a terminal state has no outgoing transition (a run cannot end and
-  continue in the same breath) and that at least one state is terminal at all (a machine with
-  no exit is a machine that never legitimately ends). If present, must be an actual boolean —
-  `terminal: yes` is rejected rather than accepted as the string `"yes"` coerced to `True` by
-  Python truthiness.
+- **`terminal`** (boolean, optional, default: `false`) — whether nothing further is
+  *possible* here. `check_machine` checks that a terminal state has no outgoing transition: a
+  run cannot end and continue in the same breath. That is the whole of it. **There is no
+  requirement that any state be terminal**, and no requirement that a terminal state be
+  accepting — see "Accepting is not terminal" above; a terminal non-accepting state is an
+  error state, and it is one of the most useful states a protocol can have. If present, must
+  be an actual boolean — `terminal: yes` is rejected rather than accepted as the string
+  `"yes"` coerced to `True` by Python truthiness.
+- **`accepting`** (boolean, optional, **default: `false`**) — whether nothing further is
+  *required* here: it is fine for the conversation to stop in this state, because nothing is
+  owed. Independent of `terminal` in both directions, and neither is derived from the other.
+  `check_machine` checks that at least one state in the machine is accepting, and that every
+  state can reach an accepting or terminal state. **The default is the conservative one on
+  purpose:** an author who marks nothing accepting gets a machine the checker rejects by
+  name, rather than one that silently says stopping anywhere is fine. If present, must be an
+  actual boolean, for the same reason `terminal` and `signal` must.
 
-Any field on a state entry other than `name`, `holder` and `terminal` is rejected by name.
+Any field on a state entry other than `name`, `holder`, `terminal` and `accepting` is
+rejected by name.
 
 ## `transitions`
 

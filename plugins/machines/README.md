@@ -10,17 +10,26 @@ a machine, advances a state, or emits a message. There is no installer — nothi
 declared machine into anything that dispatches real traffic. There is no dispatcher —
 nothing routes an inbound message to the machine that owns it. What exists is a closed
 declaration language, a parser for it, a set of checks that a single machine is
-well-formed and terminates, and a checker that runs those checks over every machine handed
+well-formed, and a checker that runs those checks over every machine handed
 to it and reports whether any two claim the same message. That is the whole of cycle A.
 Anything that talks about a machine actually running is a later cycle.
 
 ## The declaration
 
 A machine is a single ` ```machine ` fenced YAML block inside a bundle's `SKILL.md` — nine
-required fields: `machine`, `version`, `prefix`, `roles`, `kinds`, `cap`, `initial`,
-`states`, `transitions`. Any other top-level field is rejected by name, not silently
-ignored. `SCHEMA.md` documents every field and why it exists, including the two hazards
-worth knowing before you write a declaration by hand.
+fields: `machine`, `version`, `prefix`, `roles`, `kinds`, `cap`, `initial`, `states`,
+`transitions`. All of them are required except `cap`. Any other top-level field is rejected
+by name, not silently ignored. `SCHEMA.md` documents every field and why it exists,
+including the two hazards worth knowing before you write a declaration by hand.
+
+**A protocol does not have to terminate, and does not have to declare a cap.** A state is
+*accepting* when nothing further is required — it is fine for the conversation to stop
+there — and *terminal* when nothing further is possible. They are different properties and
+all four combinations are legal: a conclusion is both; an idle responder willing to answer
+another question is accepting and not terminal; a session waiting for a reply is neither;
+and an abort is terminal and *not* accepting, because the conversation ended while
+something was still owed and saying so is the point of the state. Leaving `cap` out says
+this protocol declares no bound, and nothing invents one for you.
 
 **`prefix` is a pattern, not literal text.** It is read as an expression in a small regular
 language, so a prefix containing `( ) [ ] . * + ? | \ { }` does not claim the characters you
@@ -41,11 +50,16 @@ well-formedness, and checks every pair of distinctly-named machines for a prefix
 — two protocols that could both claim the same message.
 
 What "well-formed" covers: every referenced state, role and kind is actually declared; at
-least one state is terminal; no state is stranded past a terminal one; nothing is
+least one state is accepting; every state can reach somewhere a run may legitimately stop
+(an accepting state or a terminal one); a terminal state has no way out of it; nothing is
 unreachable from `initial`; no two transitions share a trigger and disagree about where it
-leads; a state's declared `holder` is the role that actually acts on the way out of it; the
-declared `cap` is large enough for the shortest run that can reach a terminal state; and no
-declared kind sits there with no transition firing on it.
+leads; a state's declared `holder` is the role that actually acts on the way out of it; a
+declared `cap` is large enough for the shortest run that can reach an accepting state — and
+is not checked at all when no cap is declared; and no declared kind sits there with no
+transition firing on it.
+
+What it deliberately does not cover: that the machine terminates. Cycle A required that and
+it was wrong — see `SCHEMA.md`'s "Accepting is not terminal".
 
 ```
 plugins/machines/bin/machines-check plugins/machines/tests/fixtures/valid-session-relay.md
