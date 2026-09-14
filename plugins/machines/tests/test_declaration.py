@@ -298,6 +298,25 @@ class TestMalformedInputIsRejectedByNameNotByTraceback(unittest.TestCase):
                 self.assert_rejected(
                     "prefix", 'prefix: "session-relay:v1 "', "prefix: " + written)
 
+    def test_a_401_character_prefix_is_rejected(self):
+        # A literal this long parses and compiles cleanly on its own -- no
+        # metacharacter anywhere in it -- but a bare literal past 498
+        # characters blows the stack with an uncaught RecursionError deep
+        # in the NFA compiler (reached via check_all), not a
+        # DeclarationError. 401 is one past the declared 400-character
+        # limit, well short of where recursion actually fails, so this
+        # exercises the guard rather than the crash it exists to prevent.
+        self.assert_rejected(
+            "prefix", 'prefix: "session-relay:v1 "',
+            'prefix: "%s"' % ("a" * 401))
+
+    def test_a_400_character_prefix_is_accepted(self):
+        # The boundary, in the direction that matters: exactly the stated
+        # limit must parse, not be off-by-one rejected.
+        m = parse(VALID.replace(
+            'prefix: "session-relay:v1 "', 'prefix: "%s"' % ("a" * 400)))
+        self.assertEqual(len(m.prefix), 400)
+
     # -- list entries --
 
     def test_a_non_string_kinds_entry_is_rejected(self):
