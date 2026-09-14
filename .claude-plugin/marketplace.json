@@ -45,6 +45,14 @@
       "category": "entertainment",
       "description": "Rolls a random conversational tone at session start and holds it for the session; while the impatient tone holds, notes a real gap since the user's last message.",
       "author": { "name": "skomp", "url": "https://github.com/skomp" }
+    },
+    {
+      "name": "machines",
+      "source": "./plugins/machines",
+      "version": "0.1.0",
+      "category": "development",
+      "description": "Declare a communication protocol as a state machine next to the prose that explains it, and check it for well-formedness and prefix collisions against every other declared machine before you trust it. Cycle A: the schema and the checker only, no engine, no installer, no dispatcher.",
+      "author": { "name": "skomp", "url": "https://github.com/skomp" }
     }
   ]
 }

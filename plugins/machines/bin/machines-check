@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# machines-check <path>...
+#
+# Parses and checks the machine declarations named by each path (a
+# declaration file directly, or a directory to search for a SKILL.md), and
+# reports how many machines were examined, each one's own well-formedness,
+# and whether any two collide on the same prefix.
+#
+# Exit codes:
+#   0  every machine examined is well-formed and none collide
+#   1  the tool ran and found a problem: a bad declaration, or a collision
+#   2  the tool could not run at all: no paths given, python3 missing,
+#      PyYAML missing, or the interpreter itself is broken
+
+set -u
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "machines-check: python3 not found on PATH" >&2
+  exit 2
+fi
+
+# Probe for PyYAML before handing off to cli.py, so a missing dependency
+# gets an install instruction instead of a traceback. Capture stderr rather
+# than discarding it (2>&1 before 1>/dev/null, in that order, is what
+# routes stderr into the captured stream and stdout to the bin bucket): a
+# pyenv shim for an interpreter that is not installed fails this same
+# probe, but with its own message ("pyenv: version `X' is not installed"),
+# not a Python ImportError, and swallowing that would leave the user
+# staring at a misleading "install PyYAML" message for a problem that has
+# nothing to do with PyYAML.
+yaml_check_err="$(python3 -c "import yaml" 2>&1 1>/dev/null)"
+yaml_check_status=$?
+if [ "$yaml_check_status" -ne 0 ]; then
+  if printf '%s' "$yaml_check_err" | grep -q "No module named ['\"]yaml['\"]"; then
+    echo "machines-check: PyYAML is required. Install it with:" >&2
+    echo "    python3 -m pip install PyYAML" >&2
+  else
+    echo "machines-check: python3 could not run:" >&2
+    printf '%s\n' "$yaml_check_err" >&2
+  fi
+  exit 2
+fi
+
+PYTHONPATH="$HERE/../lib${PYTHONPATH:+:$PYTHONPATH}" \
+  exec python3 -m machines.cli "$@"

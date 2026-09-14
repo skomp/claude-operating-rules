@@ -67,7 +67,9 @@ def check_all(machines):
     of collision checking, rather than propagating out of this function.
     """
     problems = {}
-    collidable = []  # (machine, compiled prefix) for machines fit to compare
+    collidable = []  # machines fit to compare (prefix compiles); the compiled
+                     # pattern is not kept here -- patterns_collide recompiles
+                     # both prefixes itself on every call
 
     for m in machines:
         own_problems = list(check_machine(m))

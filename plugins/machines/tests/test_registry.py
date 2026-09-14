@@ -1,5 +1,10 @@
+import contextlib
+import io
+import os
+import tempfile
 import unittest
 
+from machines.cli import main
 from machines.declaration import parse
 from machines.registry import check_all
 from tests.test_declaration import VALID
@@ -66,6 +71,55 @@ class TestCheckAll(unittest.TestCase):
         self.assertIn("badpattern", report.problems)
         self.assertEqual(report.collisions, [("alpha", "beta")])
         self.assertEqual(report.examined, 3)
+
+
+class TestCli(unittest.TestCase):
+    def test_no_paths_exits_2_and_says_so(self):
+        out = io.StringIO()
+        with contextlib.redirect_stderr(out):
+            code = main([])
+        self.assertEqual(code, 2)
+
+    def test_a_missing_path_exits_2(self):
+        out = io.StringIO()
+        with contextlib.redirect_stderr(out):
+            code = main(["/nonexistent/SKILL.md"])
+        self.assertEqual(code, 2)
+
+    def test_a_valid_fixture_exits_0_and_reports_the_count(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = main(["tests/fixtures/valid-session-relay.md"])
+        self.assertEqual(code, 0)
+        self.assertIn("Examined 1 machine", out.getvalue())
+
+    def test_zero_machines_examined_prints_the_count_not_a_bare_pass(self):
+        # A directory that exists but holds no SKILL.md is zero machines
+        # found, not a broken tool -- exit 0, and the count must still be
+        # stated. "No collisions found" with no count would be exactly the
+        # evidence-discipline failure this requirement exists to prevent:
+        # a pass that looked at nothing, worded like a pass that checked
+        # something.
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as empty_dir:
+            with contextlib.redirect_stdout(out):
+                code = main([empty_dir])
+        self.assertEqual(code, 0)
+        self.assertIn("Examined 0 machines", out.getvalue())
+        self.assertIn("No collisions found", out.getvalue())
+
+    def test_a_malformed_declaration_exits_1_not_2(self):
+        # A file that fails to parse is a problem the checker found, not a
+        # reason the tool itself could not run -- it must not share exit 2
+        # with a missing path or missing PyYAML.
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as d:
+            bad_path = os.path.join(d, "SKILL.md")
+            with open(bad_path, "w") as f:
+                f.write("no machine block here\n")
+            with contextlib.redirect_stdout(out):
+                code = main([bad_path])
+        self.assertEqual(code, 1)
 
 
 if __name__ == "__main__":
