@@ -1,7 +1,7 @@
 # Handoff — a signal framework plugin, with `session-relay` backported onto it
 
 **Written** 2026-09-14, at the end of the session that built `session-relay`.
-**Tracked in** `claude-operating-rules#26`. Related: `#24`, `#17`, `#15`, and the router repository's first issue.
+**Tracked in** `claude-plugins#26`. Related: `claude-plugins#24`, `#17`, `#15`, and the router repository's first issue.
 **Status** design agreed in outline, nothing built.
 
 ---

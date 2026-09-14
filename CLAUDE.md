@@ -1,4 +1,4 @@
-# claude-operating-rules
+# claude-plugins
 
 ## Where work is tracked
 
