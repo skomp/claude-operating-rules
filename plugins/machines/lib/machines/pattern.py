@@ -294,8 +294,9 @@ class _Parser(object):
         #
         # This is deliberately narrower than full nullability: `a*` and
         # `a?` at top level are also nullable, but detecting that needs the
-        # compiled automaton and is Task 5's job. Do not extend this check
-        # to cover them.
+        # compiled automaton. compile_pattern below does that -- it raises
+        # PatternError whenever the start state's epsilon-closure meets the
+        # accept set. Do not extend this syntactic check to cover them.
         start = self.pos
         parts = []
         while True:
@@ -450,3 +451,235 @@ class _Parser(object):
                 "invalid range %r-%r at position %d" % (lo, hi, self.pos)
             )
         return (ord(lo), ord(hi))
+
+
+# --- NFA compiler (Task 5) -----------------------------------------------
+#
+# Thompson construction from the AST above into an NFA over Unicode
+# codepoint ranges. The representation is a contract, not a private
+# choice: Task 6 intersects two of these NFAs directly, reading `moves`
+# and `epsilon` as plain dicts/lists/sets rather than through any method
+# on this class.
+#
+# One thing the AST forces on this compiler: Task 4 desugars `x+` to
+# Cat(x, Star(x)) and `x?` to Alt(x, Empty()) using the *same* node object
+# in both positions of the Cat/Alt (see _parse_rep above). Node also
+# defines value equality (__eq__/__hash__), so two structurally-identical
+# but distinct subtrees compare equal too. Neither fact may be used to
+# cache or reuse a compiled fragment: every *occurrence* of a node in the
+# tree needs its own states, because Thompson construction wires a
+# fragment's internal states to whatever comes immediately before and
+# after it, and `x+`/`x?` need two independently-wired copies of `x`, not
+# one fragment referenced twice. This compiler never memoises by node
+# identity, by id(), or via a dict keyed on nodes -- it walks the tree
+# and allocates fresh states on every visit, full stop.
+
+
+class NFA(object):
+    """A Thompson-constructed nondeterministic finite automaton over
+    Unicode codepoint ranges.
+
+    Attributes (this shape is the contract Task 6 depends on):
+
+    - `start`: int -- the id of the start state.
+    - `accept`: Set[int] -- ids of accepting states. Thompson construction
+      as done here always produces exactly one, but the type is a set so
+      Task 6's intersection (which will generally have several) does not
+      need a different shape.
+    - `moves`: Dict[int, List[Tuple[FrozenSet[Tuple[int, int]], int]]] --
+      for each state, the list of (charset, target) character moves out of
+      it. `charset` is a frozenset of inclusive (low, high) codepoint
+      ranges, the same representation `Lit.chars` already uses, so Task
+      6's `ranges_intersect` can operate on it directly with no
+      conversion.
+    - `epsilon`: Dict[int, Set[int]] -- for each state, the set of states
+      reachable by an epsilon (no-input) move.
+
+    Every state id in [0, n) that this compiler allocated has an entry in
+    both `moves` (possibly an empty list) and `epsilon` (possibly an empty
+    set), so callers never need `.get(state, default)`.
+    """
+
+    def __init__(self, start, accept, moves, epsilon):
+        self.start = start
+        self.accept = accept
+        self.moves = moves
+        self.epsilon = epsilon
+
+    def epsilon_closure(self, states):
+        """The set of states reachable from `states` (an iterable of state
+        ids) by zero or more epsilon moves, `states` itself included.
+        """
+        closure = set(states)
+        stack = list(closure)
+        while stack:
+            state = stack.pop()
+            for target in self.epsilon.get(state, ()):
+                if target not in closure:
+                    closure.add(target)
+                    stack.append(target)
+        return closure
+
+    def accepts(self, text):
+        """Whether this NFA matches `text` exactly -- the whole string,
+        not a prefix.
+
+        This exists only so Task 5 can be tested against strings, where a
+        wrong answer is obvious, rather than against another automaton,
+        where it usually isn't. It is not part of the installer's
+        collision check: a message prefix pattern `a` is meant to match
+        any message that *starts with* something in L(a), i.e. the
+        language L(a).Sigma* -- but that Sigma*-suffix semantics belongs
+        to Task 6, where the checker builds it once and intersects. Doing
+        it here too would double-apply it (every pattern would effectively
+        become L(a).Sigma*.Sigma*, which happens to be the same language,
+        masking the bug) and, worse, would make this method answer a
+        different question than the one Task 6 actually asks, so a
+        passing `accepts` test here would say nothing about Task 6 being
+        correct. Whole-string matching is a strictly narrower question,
+        which is exactly why it is useful as a test oracle.
+        """
+        current = self.epsilon_closure({self.start})
+        for ch in text:
+            cp = ord(ch)
+            step = set()
+            for state in current:
+                for charset, target in self.moves.get(state, ()):
+                    if _codepoint_in(cp, charset):
+                        step.add(target)
+            current = self.epsilon_closure(step)
+            if not current:
+                return False
+        return bool(current & self.accept)
+
+
+def _codepoint_in(cp, charset):
+    """Whether codepoint `cp` falls in any (low, high) inclusive range of
+    `charset`. Charsets here are small (a handful of ranges at most, since
+    they come from a single character class or `.`), so a linear scan is
+    fine -- no interval tree needed.
+    """
+    for lo, hi in charset:
+        if lo <= cp <= hi:
+            return True
+    return False
+
+
+class _Compiler(object):
+    """Builds an NFA by walking a pattern AST once, Thompson-style. Each
+    `_compile_*` method returns a (start, accept) pair of state ids for a
+    single-entry, single-exit fragment; callers wire fragments together
+    with fresh epsilon moves rather than sharing states between them.
+    """
+
+    def __init__(self):
+        self._next_state = 0
+        self.moves = {}
+        self.epsilon = {}
+
+    def new_state(self):
+        state = self._next_state
+        self._next_state += 1
+        self.moves[state] = []
+        self.epsilon[state] = set()
+        return state
+
+    def add_epsilon(self, src, dst):
+        self.epsilon[src].add(dst)
+
+    def add_move(self, src, charset, dst):
+        self.moves[src].append((charset, dst))
+
+    def compile(self, node):
+        """Compile `node` into a fresh (start, accept) fragment. Dispatches
+        structurally on the node's type -- deliberately not memoised by
+        node identity or by node value (see the module-level note above
+        this class): the same node object, or an equal-but-distinct one,
+        compiles to independent states on every call.
+        """
+        if isinstance(node, Lit):
+            return self._compile_lit(node)
+        if isinstance(node, Cat):
+            return self._compile_cat(node)
+        if isinstance(node, Alt):
+            return self._compile_alt(node)
+        if isinstance(node, Star):
+            return self._compile_star(node)
+        if isinstance(node, Empty):
+            return self._compile_empty(node)
+        raise TypeError("compile_pattern: unknown AST node %r" % (node,))
+
+    def _compile_lit(self, node):
+        start = self.new_state()
+        accept = self.new_state()
+        self.add_move(start, node.chars, accept)
+        return start, accept
+
+    def _compile_cat(self, node):
+        left_start, left_accept = self.compile(node.left)
+        right_start, right_accept = self.compile(node.right)
+        self.add_epsilon(left_accept, right_start)
+        return left_start, right_accept
+
+    def _compile_alt(self, node):
+        start = self.new_state()
+        accept = self.new_state()
+        left_start, left_accept = self.compile(node.left)
+        right_start, right_accept = self.compile(node.right)
+        self.add_epsilon(start, left_start)
+        self.add_epsilon(start, right_start)
+        self.add_epsilon(left_accept, accept)
+        self.add_epsilon(right_accept, accept)
+        return start, accept
+
+    def _compile_star(self, node):
+        start = self.new_state()
+        accept = self.new_state()
+        inner_start, inner_accept = self.compile(node.node)
+        self.add_epsilon(start, inner_start)
+        self.add_epsilon(start, accept)
+        self.add_epsilon(inner_accept, inner_start)
+        self.add_epsilon(inner_accept, accept)
+        return start, accept
+
+    def _compile_empty(self, node):
+        state = self.new_state()
+        return state, state
+
+
+def compile_pattern(src):
+    """Parse `src` and compile it to an `NFA`.
+
+    Raises PatternError if `src` does not conform to the grammar (via
+    `parse_pattern`), or if the compiled pattern is nullable -- see below.
+
+    Nullability check: after Thompson construction, this takes the
+    epsilon-closure of the start state and rejects the pattern if that
+    closure meets the accept set, i.e. if the NFA matches the empty
+    string. This is deliberately the *general* check -- unlike
+    _Parser._parse_cat's syntactic check for "" and an empty alternation
+    branch, this one catches every nullable pattern regardless of shape:
+    `a*`, `a?`, `(a|)`, `(ab)*` at top level all parse fine and all reach
+    here. It matters because a message-prefix pattern is matched as
+    L(pattern).Sigma* (Task 6): if L(pattern) contains the empty string,
+    L(pattern).Sigma* is exactly Sigma*, i.e. the pattern claims *every*
+    message. That machine would then collide with every other installed
+    machine -- while every other well-formedness check still passes, so
+    nothing else catches it. The install-time collision report does not
+    fail loudly in that case; it starts saying "everything conflicts",
+    forever, with no single obviously-wrong machine to point at. Catching
+    it here, at compile time, turns that into a named PatternError at the
+    one machine that caused it.
+    """
+    node = parse_pattern(src)
+    compiler = _Compiler()
+    start, accept = compiler.compile(node)
+    nfa = NFA(start, {accept}, compiler.moves, compiler.epsilon)
+    if nfa.epsilon_closure({nfa.start}) & nfa.accept:
+        raise PatternError(
+            "pattern %r can match the empty string; as a message prefix "
+            "this claims every message (L(pattern).Sigma* becomes "
+            "Sigma*) and would collide with every other installed "
+            "machine" % src
+        )
+    return nfa
