@@ -101,5 +101,96 @@ class TestParse(unittest.TestCase):
         with self.assertRaises(DeclarationError):
             parse(bad)
 
+
+class TestBooleanTokenWordsStayStrings(unittest.TestCase):
+    """PyYAML's default resolver treats yes/no/on/off (and case variants)
+    as booleans in *any* scalar position -- a mapping key as much as a
+    value. A publisher choosing one of those words as an ordinary name
+    must get that name back, not a Python bool, in every position the
+    schema exposes: a kind, a state name, a role name, a transition's
+    `on`, and a `holder`. A test that only covers the `on:` key leaves
+    the other four positions exactly as exposed as before.
+    """
+
+    def test_kind_named_with_a_boolean_token_word_stays_a_string(self):
+        bad = VALID.replace(
+            "kinds: [triage, question, answer, conclusion, stalemate]",
+            "kinds: [yes, question, answer, conclusion, stalemate]",
+        )
+        m = parse(bad)
+        self.assertIn("yes", m.kinds)
+        self.assertNotIn(True, m.kinds)
+
+    def test_state_named_with_a_boolean_token_word_stays_a_string(self):
+        bad = VALID.replace(
+            "- { name: stalled, terminal: true }",
+            "- { name: yes, terminal: true }",
+        )
+        m = parse(bad)
+        self.assertIn("yes", m.states)
+        self.assertEqual(m.states["yes"].name, "yes")
+
+    def test_role_named_with_a_boolean_token_word_stays_a_string(self):
+        bad = VALID.replace("initiator: repository", "yes: repository")
+        m = parse(bad)
+        self.assertIn("yes", m.roles)
+
+    def test_transition_on_a_boolean_token_word_stays_a_string(self):
+        bad = VALID.replace("on: question", "on: yes")
+        m = parse(bad)
+        self.assertEqual(m.transitions[0].on, "yes")
+
+    def test_holder_set_to_a_boolean_token_word_stays_a_string(self):
+        bad = VALID.replace("holder: responder", "holder: yes")
+        m = parse(bad)
+        self.assertEqual(m.states["awaiting-triage"].holder, "yes")
+
+    def test_signal_no_longer_accepts_yes_as_true(self):
+        # The cost of narrowing the resolver: `signal: yes` is now the
+        # string "yes", not the boolean True, and this field requires an
+        # actual boolean rather than falling back to Python truthiness.
+        bad = VALID.replace("signal: true", "signal: yes", 1)
+        with self.assertRaises(DeclarationError):
+            parse(bad)
+
+
+_STATES_BLOCK = """states:
+  - { name: awaiting-triage, holder: responder }
+  - { name: awaiting-answer, holder: initiator }
+  - { name: concluded, terminal: true }
+  - { name: stalled, terminal: true }
+"""
+
+_TRANSITIONS_BLOCK = """transitions:
+  - { from: awaiting-triage, on: question, by: responder, to: awaiting-answer, signal: true }
+  - { from: awaiting-answer, on: answer, by: initiator, to: awaiting-triage, signal: true }
+  - { from: awaiting-triage, on: conclusion, by: responder, to: concluded, signal: true,
+      effects: ["label.remove:session-relay:open"] }
+  - { from: awaiting-triage, on: stalemate, by: responder, to: stalled, signal: true,
+      effects: ["label.remove:session-relay:open", "label.add:session-relay:stalled", "escalate"] }
+"""
+
+class TestMalformedListShapedFields(unittest.TestCase):
+    def test_kinds_that_is_not_a_list_raises_and_names_it(self):
+        bad = VALID.replace(
+            "kinds: [triage, question, answer, conclusion, stalemate]",
+            "kinds: yes",
+        )
+        with self.assertRaises(DeclarationError) as ctx:
+            parse(bad)
+        self.assertEqual(ctx.exception.field, "kinds")
+
+    def test_states_that_is_not_a_list_raises_and_names_it(self):
+        bad = VALID.replace(_STATES_BLOCK, "states: not-a-list\n")
+        with self.assertRaises(DeclarationError) as ctx:
+            parse(bad)
+        self.assertEqual(ctx.exception.field, "states")
+
+    def test_transitions_that_is_not_a_list_raises_and_names_it(self):
+        bad = VALID.replace(_TRANSITIONS_BLOCK, "transitions: not-a-list\n")
+        with self.assertRaises(DeclarationError) as ctx:
+            parse(bad)
+        self.assertEqual(ctx.exception.field, "transitions")
+
 if __name__ == "__main__":
     unittest.main()
