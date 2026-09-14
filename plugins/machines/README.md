@@ -19,25 +19,37 @@ Anything that talks about a machine actually running is a later cycle.
 A machine is a single ` ```machine ` fenced YAML block inside a bundle's `SKILL.md` — nine
 required fields: `machine`, `version`, `prefix`, `roles`, `kinds`, `cap`, `initial`,
 `states`, `transitions`. Any other top-level field is rejected by name, not silently
-ignored. `SCHEMA.md` documents every field and why it exists, including the one hazard
-worth knowing before you write a declaration by hand: PyYAML's default loader treats the
-bare words `yes`, `no`, `on` and `off` as booleans anywhere a string can appear, including a
-mapping key (`on: yes` is exactly the kind of word this catches) — this parser narrows that
-resolution to `true`/`false` only, so a state or role named `no` stays the string you wrote.
+ignored. `SCHEMA.md` documents every field and why it exists, including the two hazards
+worth knowing before you write a declaration by hand.
+
+**`prefix` is a pattern, not literal text.** It is read as an expression in a small regular
+language, so a prefix containing `( ) [ ] . * + ? | \ { }` does not claim the characters you
+typed — `proto(v1) ` claims `protov1 `, and `[proto] ` claims `p `, `r `, `o ` and `t ` —
+while the checker still exits `0`. Escape those characters with `\` (`proto\(v1\) `) or keep
+the prefix to letters, digits, spaces, `:` and `-`. `SCHEMA.md` carries the whole grammar.
+
+**`yes` and `no` are not booleans here.** PyYAML's default loader treats the bare words
+`yes`, `no`, `on` and `off` as booleans anywhere a string can appear, including a mapping key
+(`on: yes` is exactly the kind of word this catches) — this parser narrows that resolution to
+`true`/`false` only, so a state or role named `no` stays the string you wrote.
 
 ## The checker
 
 `bin/machines-check <path>...` — each path is a declaration file directly, or a directory
 to search for a `SKILL.md`. It parses every machine it finds, checks each one for
-well-formedness (every referenced state, role and kind actually declared; at least one
-terminal state; no state stranded past a terminal; nothing unreachable from `initial`),
-and checks every pair of distinctly-named machines for a prefix collision — two protocols
-that could both claim the same message.
+well-formedness, and checks every pair of distinctly-named machines for a prefix collision
+— two protocols that could both claim the same message.
+
+What "well-formed" covers: every referenced state, role and kind is actually declared; at
+least one state is terminal; no state is stranded past a terminal one; nothing is
+unreachable from `initial`; no two transitions share a trigger and disagree about where it
+leads; a state's declared `holder` is the role that actually acts on the way out of it; the
+declared `cap` is large enough for the shortest run that can reach a terminal state; and no
+declared kind sits there with no transition firing on it.
 
 ```
 plugins/machines/bin/machines-check plugins/machines/tests/fixtures/valid-session-relay.md
 Examined 1 machine
-No collisions found
 ```
 
 **Three exit codes, not two:**
@@ -55,11 +67,14 @@ reason that has nothing to do with PyYAML — a pyenv shim pointed at an interpr
 isn't installed, say — it lets that interpreter's own error reach stderr rather than
 reporting a misleading "install PyYAML" for a problem that isn't about PyYAML at all.
 
-**The output always states how many machines were examined, including zero.** "No
-collisions found" after looking at nothing is the failure `evidence-discipline` documents
-under a different name: a check that passed because it checked nothing. Every run of
-`machines-check` that gets past the exit-2 checks prints `Examined N machine(s)` before
-anything else, whether `N` is eleven or zero.
+**The output always states how many machines were examined, including zero — and only
+claims "No collisions found" when it examined a pair.** "No collisions found" after looking
+at nothing is the failure `evidence-discipline` documents under a different name: a check
+that passed because it checked nothing. Every run of `machines-check` that gets past the
+exit-2 checks prints `Examined N machine(s)` before anything else, whether `N` is eleven or
+zero; the collision verdict appears only when `N` is at least two, because a collision takes
+two machines and one machine is no pair. That is why the example above, on a single file,
+prints the count and stops.
 
 ## Dependency
 

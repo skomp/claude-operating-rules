@@ -17,8 +17,8 @@ miss exactly the case (a versioned prefix shadowing its own root) most
 likely to happen by accident.
 
 This module knows nothing about protocols or machines; it only intersects
-two `NFA` objects (Task 5's `pattern.py`) and answers a boolean. Task 7
-decides what to do with that boolean at install time.
+two `NFA` objects (`pattern.py`'s compiler) and answers a boolean.
+`registry.py` decides what to do with that boolean at install time.
 
 Method: build, for each NFA, the automaton for `L(pattern).Sigma*` by
 adding a self-loop over the full codepoint range to every accepting state

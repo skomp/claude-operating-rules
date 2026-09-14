@@ -125,7 +125,7 @@ as a condition that therefore never fired, and a guard that leaked protocol comm
 into ordinary replies. What it does **not** establish is use on real work — nobody has
 yet had a genuine cross-repository fault triaged this way.
 
-The untested property, for all five plugins, is retrieval: whether each `description`
+The untested property, for the five plugins that ship skills, is retrieval: whether each `description`
 actually triggers at the moment it should. If you find one that does not fire when it
 ought to, that is the most useful issue you could open.
 
