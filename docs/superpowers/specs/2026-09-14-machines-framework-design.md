@@ -485,11 +485,18 @@ that delegation works.**
 ## 11. Open, and explicitly not settled
 
 1. **The trigger.** Whether a hook sees an inbound cross-session message is **unmeasured** —
-   see §3. A fresh session in this worktree loads the registered hook and settles it at no
-   cost. Until then the dispatcher is specified as a `bin/` tool with a hook as an optional
-   front end, and **guard 1 is prose, not structure**, and the design says so. Cycle A did
-   not settle it: the spike recorded in §3 is still the only attempt, and it still measured
-   nothing. **The empty log is not a result.**
+   see §3. Until it is settled the dispatcher is specified as a `bin/` tool with a hook as an
+   optional front end, and **guard 1 is prose, not structure**, and the design says so.
+   Cycle A did not settle it: the spike recorded in §3 is still the only attempt, and it
+   still measured nothing. **The empty log is not a result.**
+
+   **How to settle it**, since the throwaway hook was removed when cycle A closed and no
+   longer sits anywhere waiting to fire: register a `UserPromptSubmit` hook in a project's
+   `.claude/settings.local.json` that logs its stdin, **start a new session** so the hook is
+   loaded at startup, and have a peer send a message. The measurement only means something
+   if a **positive control** fires in the same session — an ordinary user prompt must reach
+   the log. Without that control an empty log distinguishes nothing, which is precisely how
+   the first attempt failed.
 2. **A thread whose machine is uninstalled or upgraded mid-conversation.** Proposal: the
    trace already names protocol and version; `~/.claude-machine/` keeps old versions; a
    thread pins the version it opened with; uninstalling a machine with live threads warns
