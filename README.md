@@ -95,9 +95,13 @@ failures documented here.
 These skills have not been tested against a live agent under pressure. The first six, in
 `evidence-discipline`, `agent-operations` and `ticket-craft`, are faithful records of
 failures that already happened, not instruments anyone has watched fire. `session-relay`
-is not a record of anything — it is a design, and its two skills have not yet run against
-a live fleet of sessions. That run is scheduled, not done: this section narrows for
-`session-relay` only once the run has actually happened.
+is not a record of anything — it is a design. Its two skills **have** now been run against
+a live fleet: seven verification items on 2026-09-13 and 2026-09-14, against two
+throwaway repositories with one session bound to each. All seven passed. That run found
+three defects no review had: a precedence rule the protocol never stated, a rule written
+as a condition that therefore never fired, and a guard that leaked protocol commentary
+into ordinary replies. What it does **not** establish is use on real work — nobody has
+yet had a genuine cross-repository fault triaged this way.
 
 The untested property, for all five plugins, is retrieval: whether each `description`
 actually triggers at the moment it should. If you find one that does not fire when it
