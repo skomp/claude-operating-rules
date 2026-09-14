@@ -108,13 +108,23 @@ item    := char '-' char | char    a range, or one character
 literal := any character except | * + ? ( ) [ ] . \  -- or '\' followed by one of those
 ```
 
-That is all of it. **No backreferences, no lookaround, no anchors, no `{n,m}` counted
-repetition, no named groups, no `\d`/`\w`/`\s` shorthand classes.** Every one of those is
-rejected by name at parse time. The restriction is not taste: the installer decides
-"can these two machines claim the same message" by intersecting two automata, which is only
-decidable because every prefix here is a *regular* expression. A backreference is not
-regular, so one accepted here would sail through every other check and silently take the
-framework's central guarantee with it.
+That is all of it. **No backreferences, no lookaround, no `{n,m}` counted repetition, no
+named groups, no `\d`/`\w`/`\s` shorthand classes.** Every one of those is rejected by name
+at parse time. The restriction is not taste: the installer decides "can these two machines
+claim the same message" by intersecting two automata, which is only decidable because every
+prefix here is a *regular* expression. A backreference is not regular, so one accepted here
+would sail through every other check and silently take the framework's central guarantee
+with it.
+
+**`^` and `$` are not metacharacters in this grammar — they are ordinary literal
+characters, matched literally, exactly like `a` or `9`.** The grammar above names the only
+characters this language treats specially (`| * + ? ( ) [ ] . \`), and `^`/`$` are not
+among them (`^` is special only inside a `class`, where it negates — `[^a]` — not as an
+anchor). A prefix written `^session-relay:v1 ` does not anchor at the start of the message;
+it declares a machine that only ever claims messages beginning with a literal caret
+character, and it is accepted, not rejected. A publisher who writes `^`/`$` expecting anchor
+semantics gets no error at parse time and a machine that silently matches something other
+than what they meant.
 
 Two further limits, both reported as errors:
 

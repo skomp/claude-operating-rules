@@ -3,8 +3,10 @@
 A machine's `prefix` (see SCHEMA.md) is not a literal string but a pattern in
 a deliberately small language: literals, `.`, character classes, grouping,
 alternation, and `*`/`+`/`?` repetition. Nothing else. In particular: no
-backreferences, no lookaround, no anchors, no `{n,m}` counted repetition, no
-named groups, no shorthand classes.
+backreferences, no lookaround, no `{n,m}` counted repetition, no named
+groups, no shorthand classes. `^` and `$` are *not* anchors here -- this
+grammar has none -- they are ordinary literal characters, same as any other
+(see SCHEMA.md).
 
 The restriction exists because the installer's central guarantee -- that no
 two installed machines can claim the same message -- is decided by
