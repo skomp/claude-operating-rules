@@ -19,6 +19,11 @@ class TestCheckMachine(unittest.TestCase):
                    "to: nowhere, signal: true }")
         self.assertTrue(any("nowhere" in p for p in check_machine(m)))
 
+    def test_transition_from_an_undeclared_state_is_reported(self):
+        m = mutate("from: awaiting-triage, on: question",
+                   "from: nowhere, on: question")
+        self.assertTrue(any("nowhere" in p for p in check_machine(m)))
+
     def test_transition_on_an_undeclared_kind_is_reported(self):
         m = mutate("on: question", "on: shouting")
         self.assertTrue(any("shouting" in p for p in check_machine(m)))
@@ -26,6 +31,10 @@ class TestCheckMachine(unittest.TestCase):
     def test_transition_by_an_undeclared_role_is_reported(self):
         m = mutate("by: responder, to: awaiting-answer",
                    "by: bystander, to: awaiting-answer")
+        self.assertTrue(any("bystander" in p for p in check_machine(m)))
+
+    def test_a_state_with_an_undeclared_holder_is_reported(self):
+        m = mutate("holder: responder", "holder: bystander")
         self.assertTrue(any("bystander" in p for p in check_machine(m)))
 
     def test_a_terminal_state_with_an_outgoing_transition_is_reported(self):
@@ -64,6 +73,21 @@ class TestCheckMachine(unittest.TestCase):
         for effect in ("escalate", "label.add:anything", "label.remove:anything"):
             m = mutate('"escalate"', '"%s"' % effect)
             self.assertEqual(check_machine(m), [], effect)
+
+    def test_a_label_effect_with_an_empty_name_is_reported(self):
+        for effect in ("label.add:", "label.remove:"):
+            m = mutate('"escalate"', '"%s"' % effect)
+            self.assertTrue(
+                any(repr(effect) in p for p in check_machine(m)), effect)
+
+    def test_an_undeclared_initial_does_not_cascade_into_reachability_noise(self):
+        # A typo in `initial` should not amplify into one "not reachable"
+        # problem per declared state plus a spurious "cannot reach a
+        # terminal state" -- only check 1's message should appear.
+        m = mutate("initial: awaiting-triage", "initial: nowhere")
+        problems = check_machine(m)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertTrue(any("nowhere" in p for p in problems))
 
 if __name__ == "__main__":
     unittest.main()

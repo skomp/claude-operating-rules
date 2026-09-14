@@ -43,7 +43,8 @@ def check_machine(m):
     problems = []
     names = set(m.states)
 
-    if m.initial not in names:
+    initial_declared = m.initial in names
+    if not initial_declared:
         problems.append("initial state %r is not declared" % m.initial)
 
     for t in m.transitions:
@@ -62,9 +63,13 @@ def check_machine(m):
 
     for t in m.transitions:
         for effect in t.effects:
-            if effect != "escalate" and not (
-                effect.startswith("label.add:") or effect.startswith("label.remove:")
-            ):
+            if effect == "escalate":
+                continue
+            prefix = next(
+                (p for p in ("label.add:", "label.remove:") if effect.startswith(p)),
+                None,
+            )
+            if prefix is None or len(effect) == len(prefix):
                 problems.append("effect %r is not in the vocabulary "
                                 "(label.add:<name>, label.remove:<name>, escalate)"
                                 % effect)
@@ -77,19 +82,26 @@ def check_machine(m):
         if t.frm in terminals:
             problems.append("terminal state %r has an outgoing transition" % t.frm)
 
-    forward = {}
-    backward = {}
-    for t in m.transitions:
-        forward.setdefault(t.frm, set()).add(t.to)
-        backward.setdefault(t.to, set()).add(t.frm)
+    # Checks 8 and 9 need a declared `initial` to mean anything: with an
+    # undeclared initial state, forward-flooding from it reaches nothing,
+    # which would report every other declared state as unreachable *and*
+    # unable to terminate -- N+2 derivative problems burying the one real
+    # one. Skip both and let check 1's message stand alone; the publisher
+    # re-runs after fixing `initial`, which is cheap.
+    if initial_declared:
+        forward = {}
+        backward = {}
+        for t in m.transitions:
+            forward.setdefault(t.frm, set()).add(t.to)
+            backward.setdefault(t.to, set()).add(t.frm)
 
-    reachable = _flood({m.initial}, forward)
-    for name in sorted(names - reachable):
-        problems.append("state %r is not reachable from the initial state" % name)
+        reachable = _flood({m.initial}, forward)
+        for name in sorted(names - reachable):
+            problems.append("state %r is not reachable from the initial state" % name)
 
-    can_finish = _flood(terminals, backward)
-    for name in sorted(reachable - can_finish):
-        problems.append("state %r cannot reach a terminal state" % name)
+        can_finish = _flood(terminals, backward)
+        for name in sorted(reachable - can_finish):
+            problems.append("state %r cannot reach a terminal state" % name)
 
     return problems
 
