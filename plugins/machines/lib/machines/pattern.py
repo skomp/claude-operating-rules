@@ -35,19 +35,29 @@ Grammar::
 
 One deliberate departure from that grammar as written: the brief's prose
 says plainly "no {n,m}" and requires `a{2,3}` to be rejected, but the
-literal-exclusion list above does not name `{`. Taken literally, the
+literal-exclusion list above does not name `{`. Taken fully literally, the
 grammar would accept `{` as an ordinary character and parse `a{2,3}` as six
-concatenated literals -- which is not what "no counted repetition" means
-and contradicts the required rejection test. `{` is therefore treated as
-reserved, not as a literal; see the `{` branch of `_Parser._parse_atom`
-below for the exact wording. `}` is not similarly reserved: alone it has no
-special meaning here, so it stays an ordinary literal.
+concatenated literals, which contradicts the required rejection test.
+
+CORRECTION (fix round 1): the first version of this fix reserved `{`
+wholesale -- rejecting every bare `{` and every `\{` escape, with no way to
+match a literal brace at all. That went wider than the defect: "no counted
+repetition" is not "no brace character", and a JSON-shaped prefix like
+`{"type":"force"}` is a plausible thing for a publisher to want to match.
+`{` is rejected *only* when it opens something shaped like a genuine
+counted repetition -- `\d+(,\d*)?\}` immediately following it, i.e. `{2}`,
+`{2,}`, `{2,3}` -- via a lookahead in `_Parser._parse_atom`, not by
+reserving the character outright. A bare `{` that isn't followed by that
+shape (`{oops}`, a lone `{`) is an ordinary literal, and `\{`/`\}` are
+valid escapes to a literal brace (both are in `_METACHARACTERS`).
 
 AST node types: `Lit`, `Cat`, `Alt`, `Star`, `Empty` -- five, not seven,
 because the parser desugars `+` to `Cat(x, Star(x))` and `?` to
 `Alt(x, Empty())` rather than inventing Plus/Opt node types. Task 5's NFA
 builder therefore only ever has to handle Cat, Alt, and Star.
 """
+
+import re
 
 from .errors import DeclarationError
 
@@ -57,7 +67,18 @@ _FULL_SPAN = (0, 0x10FFFF)
 
 # Characters that are metacharacters in this grammar and therefore *not*
 # available as a bare literal. '\' escapes any of these back to a literal.
-_METACHARACTERS = set("|*+?()[].\\")
+# '{' and '}' are here so `\{`/`\}` always escape to a literal brace, even
+# though a *bare* '{' is only rejected when it opens something shaped like
+# a counted repetition -- see _COUNTED_REPETITION_RE and _parse_atom.
+_METACHARACTERS = set("|*+?(){}[].\\")
+
+# What a counted repetition looks like, immediately after '{': one or more
+# digits, then an optional ',' and zero or more digits, then '}' -- {2},
+# {2,}, {2,3}. Matched with .match(src, pos) so it's anchored at the '{'
+# without needing to re-slice the string. A bare '{' that isn't followed by
+# this shape is an ordinary literal character, not a syntax error -- see
+# the CORRECTION note in the module docstring.
+_COUNTED_REPETITION_RE = re.compile(r"\{\d+(,\d*)?\}")
 
 
 class PatternError(DeclarationError):
@@ -325,10 +346,11 @@ class _Parser(object):
             return self._parse_class()
         if ch == "\\":
             return self._parse_escape()
-        if ch == "{":
-            # See the module docstring: '{' is reserved for counted
-            # repetition even though the grammar's literal-exclusion list
-            # as written omits it.
+        if ch == "{" and _COUNTED_REPETITION_RE.match(self.src, self.pos):
+            # Only reject '{' when it actually opens {n}/{n,}/{n,m} -- see
+            # the CORRECTION note in the module docstring. A '{' that
+            # doesn't match this shape falls through to the plain-literal
+            # case below.
             raise PatternError(
                 "counted repetition '{n,m}' is not supported (at position "
                 "%d)" % self.pos
@@ -344,15 +366,16 @@ class _Parser(object):
         start = self.pos
         self._advance()  # consume '('
         if self._peek() == "?":
-            # Covers both real lookaround ((?=...), (?!...), (?<=...),
-            # (?<!...)) and named groups ((?P<name>...), (?<name>...)):
-            # every one of those starts with '(?', so one check and one
-            # named message covers the whole family. Named groups get the
-            # same "lookaround" wording per the brief's decision 2 --
-            # imprecise for that one case, but a publisher who hits it
-            # still learns their group syntax isn't supported here.
+            # CORRECTION (fix round 1): covers lookaround ((?=...),
+            # (?!...), (?<=...), (?<!...)) and named/non-capturing groups
+            # ((?P<name>...), (?<name>...), (?:...)) alike -- every one of
+            # those starts with '(?'. The brief's decision 2 said to name
+            # this "lookaround", but that's only true of some of them; the
+            # message instead names what's true of the whole family: this
+            # language has only plain groups.
             raise PatternError(
-                "lookaround is not supported at position %d" % start
+                "extended group syntax '(?...)' is not supported; this "
+                "language has only plain groups (at position %d)" % start
             )
         node = self._parse_alt()
         if self._peek() != ")":

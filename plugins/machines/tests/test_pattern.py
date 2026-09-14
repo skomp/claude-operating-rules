@@ -144,20 +144,58 @@ class TestParsePattern(unittest.TestCase):
         with self.assertRaisesRegex(PatternError, "(?i)backreference"):
             parse_pattern(r"(a)\1")
 
-    def test_lookaround_message_names_lookaround(self):
-        with self.assertRaisesRegex(PatternError, "(?i)lookaround"):
+    def test_lookaround_message_names_extended_group_syntax(self):
+        # CORRECTION (fix round 1): the brief's decision 2 said to name
+        # "lookaround", but '(?' also opens named and non-capturing groups,
+        # which aren't lookaround at all -- the message names what's true
+        # of the whole family instead. See pattern.py's _parse_group.
+        with self.assertRaisesRegex(PatternError, "(?i)extended group"):
             parse_pattern("(?=a)b")
 
     def test_negative_lookaround_is_also_rejected_and_named(self):
-        with self.assertRaisesRegex(PatternError, "(?i)lookaround"):
+        with self.assertRaisesRegex(PatternError, "(?i)extended group"):
             parse_pattern("(?!a)b")
 
-    def test_named_group_is_rejected_via_the_same_lookaround_path(self):
+    def test_named_group_is_rejected_via_the_same_extended_group_path(self):
         # (?P<name>...) also starts with '(?' -- there is no separate
         # "named group" branch in this grammar, it is caught by the same
-        # check that rejects lookaround.
-        with self.assertRaises(PatternError):
+        # check that rejects lookaround, and gets the same message.
+        with self.assertRaisesRegex(PatternError, "(?i)extended group"):
             parse_pattern("(?P<x>a)")
+
+    def test_non_capturing_group_is_also_rejected_via_the_same_path(self):
+        with self.assertRaisesRegex(PatternError, "(?i)extended group"):
+            parse_pattern("(?:a)")
+
+    # --- decision 2, fix round 1: the narrowed brace rule ---
+    #
+    # Finding 1: reserving '{' wholesale deleted a legitimate character
+    # from the language -- there was no way, escaped or not, to match a
+    # literal brace, and a JSON-shaped prefix is a plausible thing to want
+    # to match. '{' is rejected only when it opens something shaped like a
+    # genuine counted repetition (\d+(,\d*)?\} immediately after it); a
+    # bare '{' that doesn't have that shape is an ordinary literal.
+
+    # test_rejects_a_counted_repetition (in "from the brief" above) already
+    # covers "a{2,3}" -- add the bound-free form here, since {n} alone
+    # (no comma) is a distinct branch of _COUNTED_REPETITION_RE.
+
+    def test_rejects_a_counted_repetition_without_an_upper_bound(self):
+        with self.assertRaises(PatternError):
+            parse_pattern("a{2}")
+
+    def test_json_shaped_brace_literal_parses(self):
+        # A '{' not followed by digits+'}' doesn't open a counted
+        # repetition -- it's just a character in the message prefix.
+        self.assertIsNotNone(parse_pattern('{"type":"force"}'))
+
+    def test_brace_not_shaped_like_a_counted_repetition_is_a_literal(self):
+        self.assertIsNotNone(parse_pattern("a{oops}"))
+
+    def test_escaped_braces_are_literals(self):
+        self.assertEqual(
+            parse_pattern(r"\{a\}"), Cat(Cat(lit("{"), lit("a")), lit("}"))
+        )
 
 
 class TestComplementHelper(unittest.TestCase):
