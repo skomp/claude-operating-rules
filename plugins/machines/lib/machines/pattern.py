@@ -489,10 +489,24 @@ class _Parser(object):
 # AST node for a later cycle's compiler to carry; the ceiling is the cheap
 # fix and changes no contract.
 
-# The state ceiling. Generous by the standard of a message prefix: a plain
-# literal prefix costs two states per character, so this allows a
-# five-thousand-character literal. What it stops is nested repetition,
-# which reaches it in about a dozen levels.
+# The state ceiling. This is not what bounds a literal prefix's length --
+# recursion binds first, in the *compiler*, not the parser: a bare literal
+# parses fine at any length (`_parse_cat`, above, is an iterative loop),
+# but it builds a left-deep Cat tree one level per character, and
+# `_Compiler._compile_cat` walks that tree by recursion, so a literal
+# longer than 498 characters raises RecursionError during compilation
+# before state count is ever in question. A plain literal therefore never
+# reaches anywhere near 10,000 states -- the longest one that compiles at
+# all costs under 1,000. (declaration.py's `_require_prefix_length`
+# rejects a prefix past 400 characters by name, for exactly that reason,
+# well before either limit is in play.)
+#
+# What this ceiling actually guards against is nested repetition: as the
+# comment above measures, `x+` duplicates a subtree per occurrence, so
+# state count roughly doubles per nesting level and reaches 10,000 in
+# about a dozen levels of nesting -- far too shallow to hit a recursion
+# limit in either the parser or the compiler on its own. This is the only
+# way `_MAX_NFA_STATES` is ever reached.
 _MAX_NFA_STATES = 10000
 
 
