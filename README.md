@@ -12,13 +12,42 @@ Nothing in the first three is advice in the abstract. Every rule there exists be
 something broke: a security check that passed because its needle was empty, an agent that
 reverted a human's work because it could not account for it, fourteen defects that all came
 from code written into a plan document, a session that grew too large to reopen.
-`session-relay` has no such failure yet — what its build session found instead, in one
-sentence: a check whose planted fault could not fail and an addressing rule that could not
-reach one live session in four, both measured on the day and fixed before the plugin
-shipped, plus a guard that would have rejected every real signal if the transport wraps
-what it delivers. That last one was reasoned about, not observed — the guard now strips the
-wrapper before it matches, but no live signal has yet been seen, and the verification item
-that would record the wrapper's real shape has not run.
+`session-relay` has no such failure behind it, but it does have measurements in front of
+it: a check whose planted fault could not fail, an addressing rule that could not reach one
+live session in four, a precedence rule the protocol never stated, and a rule written as a
+condition that therefore never fired. All four were found by running it, and all four were
+fixed before it shipped. Its seven verification items have since been run against a live
+pair of sessions, and the transport wrapper the guard strips is now observed rather than
+assumed.
+
+## Install
+
+Two steps, typed into Claude Code. Nothing here installs itself.
+
+**1. Add this marketplace.** Once per machine:
+
+```
+/plugin marketplace add skomp/claude-operating-rules
+```
+
+**2. Install the plugins you want.** Each is packaged separately on purpose, so taking one
+never drags in another:
+
+```
+/plugin install evidence-discipline
+/plugin install agent-operations
+/plugin install ticket-craft
+/plugin install session-relay
+/plugin install tone-roulette
+```
+
+Or run `/plugin` and pick from the menu.
+
+**If you take only one, take `evidence-discipline`.** Nothing in it is specific to Claude
+Code, and it is the one that pays for itself on the first day: prove a check can fail
+before you trust that it passed, and finish a correction everywhere the claim appears.
+
+The table below says what each of the others is for, and who should skip it.
 
 ## The five plugins
 
@@ -29,17 +58,6 @@ that would record the wrapper's real shape has not run.
 | **ticket-craft** | You want ASD-STE100 Simplified Technical English enforced on every ticket. Deliberately packaged alone, so wanting the verification rules never drags this in | [plugins/ticket-craft/README.md](plugins/ticket-craft/README.md) |
 | **session-relay** | Your project spans multiple repositories, each with its own live Claude session, and you track work in GitHub issues. Skip it if you work in one repository alone, or that repository tracks work on a `TODO.md` — both are hard preconditions the protocol refuses to run without | [plugins/session-relay/README.md](plugins/session-relay/README.md) |
 | **tone-roulette** | You want a demonstration of what a plugin can do beyond skills — output styles, a `SessionStart` hook and a `UserPromptSubmit` hook, two shell handlers sharing common code — rather than another rule. It is a joke, not a lesson: it rolls a random conversational tone at session start and holds it for the session. Skip it if you only want the operating rules | [plugins/tone-roulette/README.md](plugins/tone-roulette/README.md) |
-
-## Install
-
-```
-/plugin marketplace add skomp/claude-operating-rules
-/plugin install evidence-discipline
-/plugin install agent-operations
-/plugin install ticket-craft
-/plugin install session-relay
-/plugin install tone-roulette
-```
 
 ## tone-roulette: known limitations
 
