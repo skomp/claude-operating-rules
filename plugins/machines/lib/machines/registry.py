@@ -1,10 +1,10 @@
 """Check a set of installed machines: each one's own well-formedness, and
 whether any two of them can claim the same message.
 
-This is what a person actually reads at install time -- Task 6's
+This is what a person actually reads at install time -- `product.py`'s
 `patterns_collide` answers "do these two patterns collide" for a single
 pair; this module turns that into a report over every machine that was
-handed to it, using Task 3's `check_machine` for each machine's own
+handed to it, using `machine.py`'s `check_machine` for each machine's own
 well-formedness first.
 
 Two things this module has to do that `patterns_collide` itself does not:
@@ -61,10 +61,20 @@ def check_all(machines):
     check every pair of distinctly-named machines against each other for a
     collision. Returns a `Report`.
 
-    Never raises: a machine whose prefix pattern does not compile
-    (`PatternError`, from an unparseable or nullable pattern -- see
-    pattern.py) is reported under its own name in `.problems` and left out
-    of collision checking, rather than propagating out of this function.
+    A machine whose prefix pattern does not compile (`PatternError`, from
+    an unparseable or nullable pattern -- see pattern.py) is reported under
+    its own name in `.problems` and left out of collision checking, rather
+    than propagating out of this function.
+
+    That is the only exception this function catches, and it is the only
+    one a `Machine` built by `declaration.parse` can produce here. It is
+    deliberately not described as "never raises": a `Machine` constructed
+    by hand, bypassing the parser's shape guards, can still carry a
+    non-string `prefix` or a non-iterable `transitions`, and this function
+    would let that `TypeError` through. `parse` is what makes that
+    unreachable in practice (see declaration.py's shape guards), not a
+    blanket catch here -- swallowing arbitrary exceptions would turn a bug
+    in this library into a finding about the publisher's machine.
     """
     problems = {}
     collidable = []  # machines fit to compare (prefix compiles); the compiled
@@ -76,7 +86,11 @@ def check_all(machines):
         try:
             compile_pattern(m.prefix)
         except PatternError as exc:
-            own_problems.append(str(exc))
+            # Name the field. Every `check_machine` message says which
+            # field it is about; without the prefix here, a publisher
+            # reads `alpha: unclosed group starting at position 0` and has
+            # to guess which of nine fields is a pattern at all.
+            own_problems.append("prefix pattern %r: %s" % (m.prefix, exc))
         else:
             collidable.append(m)
         if own_problems:

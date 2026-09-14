@@ -33,13 +33,15 @@ roles:
   responder: repository
 kinds: [triage, question, answer, conclusion, stalemate]
 cap: 10
-initial: awaiting-triage
+initial: unopened
 states:
+  - { name: unopened, holder: initiator }
   - { name: awaiting-triage, holder: responder }
   - { name: awaiting-answer, holder: initiator }
   - { name: concluded, terminal: true }
   - { name: stalled, terminal: true }
 transitions:
+  - { from: unopened, on: triage, by: initiator, to: awaiting-triage, signal: true }
   - { from: awaiting-triage, on: question, by: responder, to: awaiting-answer, signal: true }
   - { from: awaiting-answer, on: answer, by: initiator, to: awaiting-triage, signal: true }
   - { from: awaiting-triage, on: conclusion, by: responder, to: concluded, signal: true,
@@ -56,14 +58,14 @@ class TestParse(unittest.TestCase):
         self.assertEqual(m.version, "v1")
         self.assertEqual(m.prefix, "session-relay:v1 ")
         self.assertEqual(m.cap, 10)
-        self.assertEqual(m.initial, "awaiting-triage")
+        self.assertEqual(m.initial, "unopened")
         self.assertEqual(set(m.roles), {"initiator", "responder"})
-        self.assertEqual(len(m.states), 4)
-        self.assertEqual(len(m.transitions), 4)
+        self.assertEqual(len(m.states), 5)
+        self.assertEqual(len(m.transitions), 5)
 
     def test_transition_fields_land_on_the_right_attributes(self):
         m = parse(VALID)
-        t = m.transitions[0]
+        t = m.transitions[1]
         self.assertEqual(t.frm, "awaiting-triage")
         self.assertEqual(t.on, "question")
         self.assertEqual(t.by, "responder")
@@ -138,7 +140,7 @@ class TestBooleanTokenWordsStayStrings(unittest.TestCase):
     def test_transition_on_a_boolean_token_word_stays_a_string(self):
         bad = VALID.replace("on: question", "on: yes")
         m = parse(bad)
-        self.assertEqual(m.transitions[0].on, "yes")
+        self.assertEqual(m.transitions[1].on, "yes")
 
     def test_holder_set_to_a_boolean_token_word_stays_a_string(self):
         bad = VALID.replace("holder: responder", "holder: yes")
@@ -155,6 +157,7 @@ class TestBooleanTokenWordsStayStrings(unittest.TestCase):
 
 
 _STATES_BLOCK = """states:
+  - { name: unopened, holder: initiator }
   - { name: awaiting-triage, holder: responder }
   - { name: awaiting-answer, holder: initiator }
   - { name: concluded, terminal: true }
@@ -162,6 +165,7 @@ _STATES_BLOCK = """states:
 """
 
 _TRANSITIONS_BLOCK = """transitions:
+  - { from: unopened, on: triage, by: initiator, to: awaiting-triage, signal: true }
   - { from: awaiting-triage, on: question, by: responder, to: awaiting-answer, signal: true }
   - { from: awaiting-answer, on: answer, by: initiator, to: awaiting-triage, signal: true }
   - { from: awaiting-triage, on: conclusion, by: responder, to: concluded, signal: true,
@@ -191,6 +195,125 @@ class TestMalformedListShapedFields(unittest.TestCase):
         with self.assertRaises(DeclarationError) as ctx:
             parse(bad)
         self.assertEqual(ctx.exception.field, "transitions")
+
+
+_ROLES_BLOCK = """roles:
+  initiator: repository
+  responder: repository
+"""
+
+_A_STATE = "- { name: stalled, terminal: true }"
+_A_TRANSITION = ("  - { from: unopened, on: triage, by: initiator, "
+                 "to: awaiting-triage, signal: true }")
+_AN_EFFECTS_LIST = 'effects: ["label.remove:session-relay:open"] }'
+
+
+class TestMalformedInputIsRejectedByNameNotByTraceback(unittest.TestCase):
+    """Every one of these inputs is a plausible hand-written declaration,
+    and every one of them used to reach the caller as a raw Python
+    traceback -- ValueError, KeyError, TypeError, AttributeError -- from
+    `parse`, from `check_machine`, or from `check_all`.
+
+    That is not a cosmetic complaint. `machines-check` has three exit
+    codes on purpose: 1 is "I checked, and found a problem", 2 is "I could
+    not check at all". An uncaught exception exits 1 with a traceback,
+    which reports the tool's own crash as a finding about the publisher's
+    machine. The whole contract of this tool is to name the field that is
+    wrong, so each case here asserts on `exception.field`, not merely that
+    something was raised.
+
+    One row is worse than a crash and is the reason the list-shape guards
+    were not enough: `effects: escalate` never raised at all. A string is
+    iterable, so the effect-vocabulary check walked it character by
+    character and reported eight problems -- 'e', 's', 'c', 'a', 'l', ...
+    -- eight confident wrong answers where a crash would at least have
+    been visible.
+    """
+
+    def assert_rejected(self, field, old, new):
+        self.assertIn(old, VALID, "the splice anchor %r is stale" % old)
+        with self.assertRaises(DeclarationError) as ctx:
+            parse(VALID.replace(old, new))
+        self.assertEqual(ctx.exception.field, field)
+
+    # -- containers --
+
+    def test_roles_that_is_a_scalar_is_rejected(self):
+        self.assert_rejected("roles", _ROLES_BLOCK, "roles: nobody\n")
+
+    def test_roles_that_is_a_list_is_rejected(self):
+        self.assert_rejected("roles", _ROLES_BLOCK, "roles: [a, b]\n")
+
+    def test_a_states_entry_that_is_not_a_mapping_is_rejected(self):
+        self.assert_rejected("states", _A_STATE, "- 5")
+
+    def test_a_transitions_entry_that_is_not_a_mapping_is_rejected(self):
+        self.assert_rejected("transitions", _A_TRANSITION, "  - 5")
+
+    # -- missing sub-fields --
+
+    def test_a_states_entry_without_a_name_is_rejected(self):
+        self.assert_rejected("name", _A_STATE, "- { terminal: true }")
+
+    def test_a_transitions_entry_without_a_to_is_rejected(self):
+        self.assert_rejected("to", ", to: awaiting-answer, signal: true }",
+                             ", signal: true }")
+
+    # -- scalars the schema documents as strings --
+
+    def test_a_non_string_machine_is_rejected(self):
+        self.assert_rejected("machine", "machine: session-relay", "machine: 5")
+
+    def test_a_non_string_version_is_rejected(self):
+        self.assert_rejected("version", "version: v1", "version: 1")
+
+    def test_a_non_string_initial_is_rejected(self):
+        self.assert_rejected("initial", "initial: unopened", "initial: 5")
+
+    def test_a_non_string_state_name_is_rejected(self):
+        self.assert_rejected("name", _A_STATE, "- { name: 5, terminal: true }")
+
+    def test_a_non_string_holder_is_rejected(self):
+        self.assert_rejected("holder", "holder: responder", "holder: 5")
+
+    def test_a_non_string_transition_field_is_rejected(self):
+        for field, old, new in (
+            ("from", "from: unopened,", "from: 5,"),
+            ("on", "on: triage,", "on: 5,"),
+            ("by", "by: initiator, to: awaiting-triage", "by: 5, to: awaiting-triage"),
+            ("to", "to: awaiting-triage, signal", "to: 5, signal"),
+        ):
+            with self.subTest(field=field):
+                self.assert_rejected(field, old, new)
+
+    def test_a_non_string_prefix_is_rejected(self):
+        # This one never crashed in `parse` at all: `prefix: 5` parsed
+        # cleanly and then failed with `TypeError: object of type 'int'
+        # has no len()` out of the pattern compiler, one module and one
+        # public entry point away from the field that caused it.
+        for written in ("5", "", "2.0"):
+            with self.subTest(prefix=written):
+                self.assert_rejected(
+                    "prefix", 'prefix: "session-relay:v1 "', "prefix: " + written)
+
+    # -- list entries --
+
+    def test_a_non_string_kinds_entry_is_rejected(self):
+        self.assert_rejected(
+            "kinds", "kinds: [triage, question, answer, conclusion, stalemate]",
+            "kinds: [5]")
+
+    def test_a_non_string_effects_entry_is_rejected(self):
+        self.assert_rejected("effects", _AN_EFFECTS_LIST, "effects: [5] }")
+
+    def test_a_scalar_effects_field_is_rejected(self):
+        self.assert_rejected("effects", _AN_EFFECTS_LIST, "effects: 5 }")
+
+    def test_a_bare_string_effects_field_is_rejected_not_iterated(self):
+        # The row that did not crash: eight problems, one per character of
+        # "escalate", every one of them wrong.
+        self.assert_rejected("effects", _AN_EFFECTS_LIST, "effects: escalate }")
+
 
 if __name__ == "__main__":
     unittest.main()

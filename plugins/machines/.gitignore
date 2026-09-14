@@ -1,0 +1,6 @@
+# This plugin is the repository's first Python, and the repository has no
+# .gitignore of its own. Running the test suite writes bytecode next to the
+# sources, so `git add plugins/machines` -- the obvious way to stage this
+# directory, and the one the plan's own steps use -- would commit it.
+# Nothing is committed today; this keeps it that way.
+__pycache__/

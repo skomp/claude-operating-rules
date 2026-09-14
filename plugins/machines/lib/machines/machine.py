@@ -82,12 +82,62 @@ def check_machine(m):
         if t.frm in terminals:
             problems.append("terminal state %r has an outgoing transition" % t.frm)
 
-    # Checks 8 and 9 need a declared `initial` to mean anything: with an
-    # undeclared initial state, forward-flooding from it reaches nothing,
-    # which would report every other declared state as unreachable *and*
-    # unable to terminate -- N+2 derivative problems burying the one real
-    # one. Skip both and let check 1's message stand alone; the publisher
-    # re-runs after fixing `initial`, which is cheap.
+    # Determinism. Two transitions sharing (from, on, by) with different
+    # `to` states leave the machine with a choice no declaration resolves.
+    # The engine is specified as a fold over the message trace, and a fold
+    # is a function: it has exactly one result per (state, message). A
+    # nondeterministic declaration therefore cannot be run at all, and
+    # nothing else here says so -- every other check passes on it.
+    destinations = {}
+    for t in m.transitions:
+        destinations.setdefault((t.frm, t.on, t.by), set()).add(t.to)
+    for trigger in sorted(destinations):
+        targets = destinations[trigger]
+        if len(targets) > 1:
+            problems.append(
+                "transitions from %r on %r by %r are nondeterministic: they "
+                "lead to %s" % (trigger[0], trigger[1], trigger[2],
+                                ", ".join(repr(x) for x in sorted(targets))))
+
+    # Holder agreement. A state's `holder` and a transition's `by` both
+    # answer "who acts next" -- the channel-layer property the design makes
+    # checkable. Declared twice and never reconciled, they can disagree:
+    # a state held by `initiator` whose only exits are `by: responder` says
+    # the initiator must act and that only the responder can.
+    #
+    # Terminal states are exempt (nobody acts next), and so is a state with
+    # no `holder` at all, which is optional: with nothing declared there is
+    # nothing to contradict. A non-terminal state with no outgoing
+    # transition agrees vacuously, and is already reported by the
+    # termination check below.
+    outgoing_by = {}
+    for t in m.transitions:
+        outgoing_by.setdefault(t.frm, set()).add(t.by)
+    for name in sorted(names):
+        s = m.states[name]
+        if s.terminal or s.holder is None:
+            continue
+        disagreeing = sorted(a for a in outgoing_by.get(name, ()) if a != s.holder)
+        if disagreeing:
+            problems.append(
+                "state %r declares holder %r but has outgoing transitions by %s"
+                % (name, s.holder, ", ".join(repr(a) for a in disagreeing)))
+
+    # An unused kind. A kind nobody fires on is vocabulary a publisher
+    # believes is part of the protocol and that the protocol cannot
+    # receive: the declaration says the machine understands it, and no
+    # state does anything with it.
+    fired_on = set(t.on for t in m.transitions)
+    for kind in sorted(set(m.kinds) - fired_on):
+        problems.append("kind %r is declared but no transition fires on it" % kind)
+
+    # The reachability, termination and cap checks all need a declared
+    # `initial` to mean anything: with an undeclared initial state,
+    # forward-flooding from it reaches nothing, which would report every
+    # other declared state as unreachable *and* unable to terminate --
+    # N+2 derivative problems burying the one real one. Skip them and let
+    # the `initial` message stand alone; the publisher re-runs after fixing
+    # `initial`, which is cheap.
     if initial_declared:
         forward = {}
         backward = {}
@@ -103,7 +153,44 @@ def check_machine(m):
         for name in sorted(reachable - can_finish):
             problems.append("state %r cannot reach a terminal state" % name)
 
+        # Cap satisfiability. `cap` bounds the outbound messages one run
+        # may emit, i.e. the transitions it may fire. If even the shortest
+        # path from `initial` to a terminal state is longer than the cap,
+        # no run can both stay under the cap and end legitimately -- the
+        # machine is declared to terminate and declared unable to. BFS,
+        # because it is the shortest path that decides this, not any path.
+        #
+        # Nothing is reported when no terminal state is reachable at all:
+        # that is already the termination check's finding, and a cap
+        # message on top of it would be a second symptom of one cause.
+        shortest = _shortest_distance(m.initial, terminals, forward)
+        if shortest is not None and shortest > m.cap:
+            problems.append(
+                "cap %d is too small: the shortest run from %r to a terminal "
+                "state fires %d transitions" % (m.cap, m.initial, shortest))
+
     return problems
+
+
+def _shortest_distance(start, goals, graph):
+    """Breadth-first distance in edges from `start` to the nearest member of
+    `goals`, or None when no member of `goals` is reachable.
+    """
+    frontier = [start]
+    seen = {start}
+    distance = 0
+    while frontier:
+        if any(node in goals for node in frontier):
+            return distance
+        following = []
+        for node in frontier:
+            for target in graph.get(node, ()):
+                if target not in seen:
+                    seen.add(target)
+                    following.append(target)
+        frontier = following
+        distance += 1
+    return None
 
 
 def _flood(seeds, graph):
