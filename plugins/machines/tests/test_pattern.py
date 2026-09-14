@@ -11,6 +11,7 @@ from machines.pattern import (
     Empty,
     NFA,
     _MAX_NFA_STATES,
+    _MAX_GROUP_DEPTH,
     _complement,
     _merge_ranges,
 )
@@ -432,6 +433,62 @@ class TestStateCeiling(unittest.TestCase):
         # And it must not reject repetition as such: five levels is 126
         # states, well inside the limit.
         self.assertIsNotNone(compile_pattern(self.nested_plus(5)))
+
+
+class TestGroupNestingDepth(unittest.TestCase):
+    """`(...)` nesting is the one recursive production in this grammar
+    (see `_MAX_GROUP_DEPTH`'s comment in pattern.py): a chain of literals,
+    `|` branches, or `*`/`+`/`?` suffixes is consumed in a loop and never
+    deepens the parser's call stack, but each nested group recurses back
+    into `_parse_alt`, in both the parser and (via the resulting AST
+    shape) the Thompson compiler.
+
+    Found end to end through the shipped CLI: `'(' * 199 + 'a' + ')' *
+    199` is 399 characters -- one under declaration.py's 400-character
+    length guard, which bounds a different route (a long flat
+    concatenation/alternation chain) and does nothing for nesting depth.
+    That prefix used to reach `compile_pattern` and blow the stack with a
+    raw `RecursionError`, reported through `bin/machines-check` as exit 1
+    with a Python traceback instead of a named problem.
+    """
+
+    def nested_group(self, depth):
+        return "(" * depth + "a" + ")" * depth
+
+    def test_a_199_deep_prefix_is_rejected_by_name(self):
+        # The reviewer's reproduction, verbatim: 399 characters, under the
+        # 400-character length guard, so that guard cannot be why this is
+        # rejected -- only the nesting-depth guard can be.
+        prefix = "(" * 199 + "a" + ")" * 199
+        self.assertEqual(len(prefix), 399)
+        with self.assertRaises(PatternError) as ctx:
+            compile_pattern(prefix)
+        message = str(ctx.exception)
+        self.assertIn("nesting", message)
+        self.assertIn(str(_MAX_GROUP_DEPTH), message)
+
+    def test_a_60_deep_prefix_is_accepted(self):
+        # Under the new guard -- must not reject a legitimate pattern just
+        # because a guard now exists.
+        nfa = compile_pattern(self.nested_group(60))
+        self.assertIsNotNone(nfa)
+
+    def test_the_rejection_is_immediate_not_after_a_stack_dive(self):
+        # Same discipline as TestStateCeiling's timing test: the guard
+        # must stop the parser at the boundary, not let it recurse close
+        # to the limit and merely catch the resulting RecursionError.
+        import time
+        start = time.time()
+        with self.assertRaises(PatternError):
+            compile_pattern(self.nested_group(199))
+        self.assertLess(time.time() - start, 1.0)
+
+    def test_exactly_the_limit_is_accepted_not_off_by_one_rejected(self):
+        self.assertIsNotNone(compile_pattern(self.nested_group(_MAX_GROUP_DEPTH)))
+
+    def test_one_past_the_limit_is_rejected(self):
+        with self.assertRaises(PatternError):
+            compile_pattern(self.nested_group(_MAX_GROUP_DEPTH + 1))
 
 
 if __name__ == "__main__":

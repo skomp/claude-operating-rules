@@ -72,6 +72,49 @@ class TestCheckAll(unittest.TestCase):
         self.assertEqual(report.collisions, [("alpha", "beta")])
         self.assertEqual(report.examined, 3)
 
+    # --- gap found by the cycle-A reviewer: a prefix nested deep enough
+    # in `(...)` groups used to reach `compile_pattern` and blow the stack
+    # with an uncaught RecursionError, past the 400-character length guard
+    # (which bounds a different route -- see declaration.py). pattern.py's
+    # nesting-depth guard closes the ordinary case with a named
+    # PatternError; the tests below check `check_all` reports it as a
+    # normal problem either way, including via a raw RecursionError that
+    # bypasses the parser's own guard (a stand-in for "whatever shape, if
+    # any, we haven't thought of").
+
+    def test_a_deeply_nested_prefix_is_reported_not_raised(self):
+        deep = named("deepprefix", "(" * 199 + "a" + ")" * 199)
+        report = check_all([deep, named("beta", "beta:v1 ")])
+        self.assertIn("deepprefix", report.problems)
+        self.assertNotIn("beta", report.problems)
+        self.assertEqual(report.collisions, [])
+
+    def test_a_moderately_nested_prefix_is_not_reported_as_a_problem(self):
+        # The guard must not reject a legitimate pattern: 60 levels is
+        # well under the 100-level limit.
+        ok = named("okprefix", "(" * 60 + "a" + ")" * 60)
+        report = check_all([ok])
+        self.assertNotIn("okprefix", report.problems)
+
+    def test_a_raw_recursion_error_is_still_reported_not_raised(self):
+        # Exercises the RecursionError backstop directly (not the parser's
+        # nesting-depth guard, which would normally catch this shape
+        # first): if some other AST shape ever reaches a deep stack, the
+        # backstop at the compile_pattern call site must still turn it
+        # into a named problem, the same as PatternError does.
+        import machines.pattern as pattern_module
+        original_limit = pattern_module._MAX_GROUP_DEPTH
+        pattern_module._MAX_GROUP_DEPTH = 10 ** 9
+        try:
+            deep = named("deepprefix", "(" * 199 + "a" + ")" * 199)
+            report = check_all([deep, named("beta", "beta:v1 ")])
+        finally:
+            pattern_module._MAX_GROUP_DEPTH = original_limit
+        self.assertIn("deepprefix", report.problems)
+        self.assertIn("too deeply nested", report.problems["deepprefix"][0])
+        self.assertNotIn("beta", report.problems)
+        self.assertEqual(report.collisions, [])
+
 
 class TestCli(unittest.TestCase):
     def test_no_paths_exits_2_and_says_so(self):
@@ -151,6 +194,35 @@ class TestCli(unittest.TestCase):
             with contextlib.redirect_stdout(out):
                 code = main([bad_path])
         self.assertEqual(code, 1)
+
+    # --- end to end, through the shipped CLI: the reviewer's reproduction
+    # for the deeply-nested-prefix gap (see TestCheckAll above for the
+    # same fixture exercised directly against check_all).
+
+    def test_a_199_deep_prefix_exits_1_with_a_named_problem_not_a_traceback(self):
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "SKILL.md")
+            with open(path, "w") as f:
+                f.write(VALID.replace(
+                    'prefix: "session-relay:v1 "',
+                    'prefix: "%s"' % ("(" * 199 + "a" + ")" * 199)))
+            with contextlib.redirect_stdout(out):
+                code = main([path])
+        self.assertEqual(code, 1)
+        self.assertIn("nesting", out.getvalue())
+
+    def test_a_60_deep_prefix_exits_0(self):
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "SKILL.md")
+            with open(path, "w") as f:
+                f.write(VALID.replace(
+                    'prefix: "session-relay:v1 "',
+                    'prefix: "%s"' % ("(" * 60 + "a" + ")" * 60)))
+            with contextlib.redirect_stdout(out):
+                code = main([path])
+        self.assertEqual(code, 0, out.getvalue())
 
 
 if __name__ == "__main__":

@@ -82,6 +82,29 @@ _METACHARACTERS = set("|*+?(){}[].\\")
 # the CORRECTION note in the module docstring.
 _COUNTED_REPETITION_RE = re.compile(r"\{\d+(,\d*)?\}")
 
+# How many levels of `(...)` nesting `_parse_group` will follow before
+# giving up and naming the problem, rather than letting Python's own call
+# stack be the limit.
+#
+# `_parse_group` is the *only* recursive production in this grammar --
+# `_parse_alt` and `_parse_cat` consume repeated `|`-branches and
+# concatenated atoms in a `while` loop, not by recursing per element (see
+# their bodies below), so a long chain of literals, `|` branches, or `*`/
+# `+`/`?` suffixes never deepens the call stack on its own. Only `(`
+# recursing back into `_parse_alt` does, and it does so on both sides of
+# this module: here in the parser, and again in `_Compiler.compile`, which
+# walks the resulting AST by the same kind of recursion. A prefix of
+# `'(' * 199 + 'a' + ')' * 199` (199 levels, 399 characters -- under the
+# 400-character length guard in declaration.py, which bounds a different
+# failure; see that module) drives `_parse_group` to a `RecursionError`
+# at depth 199; depth 198 still parses. 100 is comfortably under that
+# measured failure point while being far beyond any real prefix, so a
+# publisher gets a named `PatternError` here in the ordinary case. The
+# `RecursionError` backstop in registry.py exists for whatever shape (if
+# any) reaches a deep stack some other way -- this guard is the nice
+# error, not the guarantee.
+_MAX_GROUP_DEPTH = 100
+
 
 class PatternError(DeclarationError):
     """A prefix pattern violates the restricted grammar.
@@ -252,6 +275,7 @@ class _Parser(object):
     def __init__(self, src):
         self.src = src
         self.pos = 0
+        self._group_depth = 0  # see _MAX_GROUP_DEPTH and _parse_group below
 
     def parse(self):
         node = self._parse_alt()
@@ -380,7 +404,23 @@ class _Parser(object):
                 "extended group syntax '(?...)' is not supported; this "
                 "language has only plain groups (at position %d)" % start
             )
-        node = self._parse_alt()
+        # This is the one recursive step in the grammar (see
+        # _MAX_GROUP_DEPTH above): every other production consumes
+        # repeated elements in a loop. Count depth on the way in, checked
+        # before recursing further, so the rejection fires at 101 levels
+        # deep -- comfortably before Python's own call stack would --
+        # rather than after.
+        self._group_depth += 1
+        if self._group_depth > _MAX_GROUP_DEPTH:
+            raise PatternError(
+                "nesting is %d levels deep; the limit is %d levels "
+                "(group opened at position %d)"
+                % (self._group_depth, _MAX_GROUP_DEPTH, start)
+            )
+        try:
+            node = self._parse_alt()
+        finally:
+            self._group_depth -= 1
         if self._peek() != ")":
             raise PatternError("unclosed group starting at position %d" % start)
         self._advance()  # consume ')'

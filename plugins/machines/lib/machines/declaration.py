@@ -180,15 +180,29 @@ def _require_present(raw, key, where):
 # Measured: a 498-character literal prefix compiles; 499 raises
 # `RecursionError` out of `compile_pattern`, reached via `check_all` (see
 # registry.py), past every shape guard above, as an uncaught traceback --
-# exit 1 from `machines-check` for a crash, not a finding. That is the
-# exact failure `check_all` and this module's shape guards otherwise exist
-# to prevent.
+# exit 1 from `machines-check` for a crash, not a finding.
 #
-# 400 is the limit: two orders of magnitude above `session-relay:v1 ` (17
-# characters) or any other plausible protocol prefix, comfortably under
-# the 498 where recursion fails, checked here -- before the pattern parser
-# ever sees the text -- so the publisher gets a named field and a stated
-# limit instead of a stack trace.
+# 400 is the limit for *this* route: two orders of magnitude above
+# `session-relay:v1 ` (17 characters) or any other plausible protocol
+# prefix, comfortably under the 498 where a bare literal's recursion
+# fails, checked here -- before the pattern parser ever sees the text --
+# so the publisher gets a named field and a stated limit instead of a
+# stack trace for that shape of input.
+#
+# CORRECTION: an earlier version of this comment called 498 "the exact
+# failure this module's shape guards otherwise exist to prevent" -- true
+# only for a bare literal. A prefix built from nested `(...)` groups
+# recurses in the *parser*, not just the compiler, and hits it far
+# shallower: `'(' * 199 + 'a' + ')' * 199` is 399 characters -- under this
+# 400-character guard -- and still raised an uncaught `RecursionError`
+# through the shipped CLI. This length guard bounds the concatenation-
+# chain route (a long flat Cat/Alt tree, whatever it's built from --
+# literals, `|` branches, or short reps) and nothing else; it was never a
+# bound on nesting depth. Nesting depth has its own guard now
+# (`_MAX_GROUP_DEPTH` in pattern.py, checked in `_parse_group`), and
+# whatever either guard misses is caught as a last resort where
+# `compile_pattern` is called (see registry.py's `RecursionError` handler)
+# rather than propagating as a traceback.
 _MAX_PREFIX_LENGTH = 400
 
 

@@ -66,12 +66,24 @@ def check_all(machines):
     its own name in `.problems` and left out of collision checking, rather
     than propagating out of this function.
 
-    That is the only exception this function catches, and it is the only
-    one a `Machine` built by `declaration.parse` can produce here. It is
-    deliberately not described as "never raises": a `Machine` constructed
-    by hand, bypassing the parser's shape guards, can still carry a
-    non-string `prefix` or a non-iterable `transitions`, and this function
-    would let that `TypeError` through. `parse` is what makes that
+    A prefix nested deep enough in `(...)` groups is named by
+    `PatternError` too -- pattern.py's parser tracks nesting depth and
+    rejects past 100 levels, well short of where it would recurse into a
+    raw `RecursionError`. That guard is the ordinary case; `RecursionError`
+    itself is also caught here, alongside `PatternError`, as a backstop --
+    converted to the same kind of named problem -- for whatever AST shape
+    (if any) reaches a deep stack some other way, in either the parser or
+    the compiler. See pattern.py's `_MAX_GROUP_DEPTH` for the measurement
+    and reasoning; the handler below stays trivial on purpose (no
+    formatting that calls back into pattern code, no further recursion),
+    since `RecursionError` fires with the stack nearly exhausted.
+
+    Those are the only exceptions this function catches, and they are the
+    only ones a `Machine` built by `declaration.parse` can produce here. It
+    is deliberately not described as "never raises": a `Machine`
+    constructed by hand, bypassing the parser's shape guards, can still
+    carry a non-string `prefix` or a non-iterable `transitions`, and this
+    function would let that `TypeError` through. `parse` is what makes that
     unreachable in practice (see declaration.py's shape guards), not a
     blanket catch here -- swallowing arbitrary exceptions would turn a bug
     in this library into a finding about the publisher's machine.
@@ -91,6 +103,16 @@ def check_all(machines):
             # reads `alpha: unclosed group starting at position 0` and has
             # to guess which of nine fields is a pattern at all.
             own_problems.append("prefix pattern %r: %s" % (m.prefix, exc))
+        except RecursionError:
+            # Backstop, not the primary guard -- see the docstring above
+            # and pattern.py's `_MAX_GROUP_DEPTH`. Deliberately trivial:
+            # RecursionError is raised with the stack nearly exhausted, and
+            # while Python unwinds before this handler runs, the handler
+            # itself must not recurse or call back into pattern code (a
+            # %r of a string does not). Just name the field and stop.
+            own_problems.append(
+                "prefix pattern %r: too deeply nested to analyse" % (m.prefix,)
+            )
         else:
             collidable.append(m)
         if own_problems:
