@@ -19,7 +19,8 @@ states:
   - { name: concluded, terminal: true }
   - { name: stalled, terminal: true }
 transitions:
-  - { from: unopened, on: triage, by: initiator, to: awaiting-triage, signal: true }
+  - { from: unopened, on: triage, by: initiator, to: awaiting-triage, signal: true,
+      effects: ["label.add:session-relay:open"] }
   - { from: awaiting-triage, on: question, by: responder, to: awaiting-answer, signal: true }
   - { from: awaiting-answer, on: answer, by: initiator, to: awaiting-triage, signal: true }
   - { from: awaiting-triage, on: conclusion, by: responder, to: concluded, signal: true,

@@ -41,7 +41,8 @@ states:
   - { name: concluded, terminal: true }
   - { name: stalled, terminal: true }
 transitions:
-  - { from: unopened, on: triage, by: initiator, to: awaiting-triage, signal: true }
+  - { from: unopened, on: triage, by: initiator, to: awaiting-triage, signal: true,
+      effects: ["label.add:session-relay:open"] }
   - { from: awaiting-triage, on: question, by: responder, to: awaiting-answer, signal: true }
   - { from: awaiting-answer, on: answer, by: initiator, to: awaiting-triage, signal: true }
   - { from: awaiting-triage, on: conclusion, by: responder, to: concluded, signal: true,
@@ -165,7 +166,8 @@ _STATES_BLOCK = """states:
 """
 
 _TRANSITIONS_BLOCK = """transitions:
-  - { from: unopened, on: triage, by: initiator, to: awaiting-triage, signal: true }
+  - { from: unopened, on: triage, by: initiator, to: awaiting-triage, signal: true,
+      effects: ["label.add:session-relay:open"] }
   - { from: awaiting-triage, on: question, by: responder, to: awaiting-answer, signal: true }
   - { from: awaiting-answer, on: answer, by: initiator, to: awaiting-triage, signal: true }
   - { from: awaiting-triage, on: conclusion, by: responder, to: concluded, signal: true,
@@ -203,8 +205,8 @@ _ROLES_BLOCK = """roles:
 """
 
 _A_STATE = "- { name: stalled, terminal: true }"
-_A_TRANSITION = ("  - { from: unopened, on: triage, by: initiator, "
-                 "to: awaiting-triage, signal: true }")
+_A_TRANSITION = ("  - { from: awaiting-triage, on: question, by: responder, "
+                 "to: awaiting-answer, signal: true }")
 _AN_EFFECTS_LIST = 'effects: ["label.remove:session-relay:open"] }'
 
 
