@@ -1,6 +1,8 @@
+import copy
 import unittest
 
-from machines.product import patterns_collide, ranges_intersect
+from machines.pattern import compile_pattern
+from machines.product import patterns_collide, ranges_intersect, _with_sigma_star_loops
 
 
 class TestRangesIntersect(unittest.TestCase):
@@ -67,14 +69,57 @@ class TestPatternsCollide(unittest.TestCase):
         self.assertFalse(patterns_collide("session-relay:v1 ", "machines:v1 "))
 
     def test_collision_is_symmetric(self):
-        self.assertEqual(
-            patterns_collide("session-relay:", "session-relay:v1 "),
-            patterns_collide("session-relay:v1 ", "session-relay:"),
-        )
+        # assertEqual alone would also pass if both directions were wrongly
+        # False, so pin down the actual truth value in both directions.
+        self.assertTrue(patterns_collide("session-relay:", "session-relay:v1 "))
+        self.assertTrue(patterns_collide("session-relay:v1 ", "session-relay:"))
+
+        # A second pair with very different shapes, where the only witness
+        # ("cb") exists purely through the Sigma* extension rather than
+        # through any literal text the two patterns share: L(".*b") claims
+        # any string containing a "b"; L("c").Sigma* claims any string
+        # starting with "c". "cb" is in both.
+        self.assertTrue(patterns_collide(".*b", "c"))
+        self.assertTrue(patterns_collide("c", ".*b"))
 
     def test_a_pattern_always_collides_with_itself(self):
         for src in ("a", "a*b", "[a-c]x", "foo|bar", "session-relay:v1 "):
             self.assertTrue(patterns_collide(src, src), src)
+
+    def test_negated_class_does_not_collide_with_the_char_it_excludes(self):
+        # [^a]x compiles to a Lit with a multi-range charset (the complement
+        # of 'a' within the full codepoint span, split around it), which
+        # ranges_intersect's hand-built multi-range tests never exercise
+        # end-to-end. "ax" starts with the excluded 'a', so no overlap.
+        self.assertFalse(patterns_collide("[^a]x", "ax"))
+
+    def test_negated_class_collides_with_a_char_it_does_not_exclude(self):
+        self.assertTrue(patterns_collide("[^a]x", "bx"))
+
+
+class TestNoMutation(unittest.TestCase):
+    """Protects the non-mutation invariant _with_sigma_star_loops relies
+    on: it must build a new moves dict rather than editing the source
+    NFA's moves/epsilon in place. Nothing else in this suite would catch a
+    regression to in-place append -- all 18-plus tests above would still
+    pass, since they only ever compile fresh NFAs and never inspect the
+    same NFA object before and after augmentation. This test is the one
+    that would fail if product.py:80 changed from rebuilding a list to
+    mutating it -- confirmed by hand: temporarily replacing the rebuild
+    with `augmented[state].append((_SIGMA, state))` makes this test fail
+    (see the fix-round report for the exact command and output) while
+    every other test in this file keeps passing.
+    """
+
+    def test_with_sigma_star_loops_does_not_mutate_the_source_nfa(self):
+        nfa = compile_pattern("a*b|[c-e]+")
+        moves_before = copy.deepcopy(nfa.moves)
+        epsilon_before = copy.deepcopy(nfa.epsilon)
+
+        _with_sigma_star_loops(nfa)
+
+        self.assertEqual(nfa.moves, moves_before)
+        self.assertEqual(nfa.epsilon, epsilon_before)
 
 
 if __name__ == "__main__":

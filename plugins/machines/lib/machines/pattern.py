@@ -40,15 +40,15 @@ grammar would accept `{` as an ordinary character and parse `a{2,3}` as six
 concatenated literals, which contradicts the required rejection test.
 
 CORRECTION (fix round 1): the first version of this fix reserved `{`
-wholesale -- rejecting every bare `{` and every `\{` escape, with no way to
+wholesale -- rejecting every bare `{` and every `\\{` escape, with no way to
 match a literal brace at all. That went wider than the defect: "no counted
 repetition" is not "no brace character", and a JSON-shaped prefix like
 `{"type":"force"}` is a plausible thing for a publisher to want to match.
 `{` is rejected *only* when it opens something shaped like a genuine
-counted repetition -- `\d+(,\d*)?\}` immediately following it, i.e. `{2}`,
+counted repetition -- `\\d+(,\\d*)?\\}` immediately following it, i.e. `{2}`,
 `{2,}`, `{2,3}` -- via a lookahead in `_Parser._parse_atom`, not by
 reserving the character outright. A bare `{` that isn't followed by that
-shape (`{oops}`, a lone `{`) is an ordinary literal, and `\{`/`\}` are
+shape (`{oops}`, a lone `{`) is an ordinary literal, and `\\{`/`\\}` are
 valid escapes to a literal brace (both are in `_METACHARACTERS`).
 
 AST node types: `Lit`, `Cat`, `Alt`, `Star`, `Empty` -- five, not seven,
