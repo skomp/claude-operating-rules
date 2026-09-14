@@ -408,3 +408,71 @@ Open after this run:
   noticed.
 - The item 2 finding — a session mentioning the relay in a reply the relay is inert for —
   is a wording question for `handling-an-inbound-ping`, not a defect in the guard.
+
+---
+
+## Item 6 — prove a stuck exit — PASS
+
+Run 2026-09-14 against the same rig.
+
+**Method.** Driving twenty real exchanges was not necessary: the cap counts protocol
+headers, not meaning. `skomp/courseware-authoring#11` was seeded with ten comments
+carrying `from=courseware-authoring-e7` (the cap exactly), three from the peer, and the
+`session-relay:open` label. The session was then signalled
+`session-relay:v1 answer skomp/courseware-authoring#11 blocking=no` — an inbound message
+that would ordinarily earn a reply.
+
+**It recognised the cap before acting**, in its own words:
+
+> So the inbound `kind=answer` does not get answered. An eleventh question is exactly
+> what the cap exists to stop. The stuck exit runs instead.
+
+**All four steps of the stuck exit happened.**
+
+1. **The stalemate comment.** `kind=stalemate`, correct header, with the three required
+   parts — what is agreed, what is open, what each side says. It attributes positions to
+   named sessions and cites the seq numbers it is summarising. Its closing section is the
+   one that matters:
+
+   > The thread stops for this reason only. The thread does not stop because the two
+   > sides agree, and it does not stop because the fault is known.
+
+   It refuses to dress a cap as a conclusion, and says a human must supply the missing
+   fact.
+
+2. **The label swap.** `session-relay:open` → `session-relay:stalled`, **performed by the
+   dispatched subagent.** This is the permission added after the final whole-branch review
+   found that a subagent restricted to writing comments could never complete a
+   termination, leaving the recovery check returning threads that were finished.
+
+3. **The peer was signalled, and the session generalised correctly beyond the rule.** The
+   skill says to signal the peer so it does not post into a dead thread. The session
+   signalled *two* parties: the thread's peer, ref-matched against the live session, and
+   the session that had delivered the inbound signal — "so neither one is left
+   mid-compose".
+
+4. **The escalation stayed with the session.** It refused to delegate step 4:
+
+   > That last part is step 4, and it is mine, not the subagent's. When it reports, I
+   > bring you the specific decision this thread is stuck on.
+
+   That is the boundary the skill draws — a subagent returns to its session, and the
+   session asks its own human partner.
+
+### Two findings
+
+**The stalemate comment is the eleventh, and renders as `11 of 10`.** The cap is ten
+comments carrying your own `from=`; the stuck exit then posts one more. The visible line
+is therefore truthful and looks like an error. The design does not say how to render
+`seq` at the exit. Decide it: either the exit is exempt from the count and says so, or
+the cap is nine ordinary comments plus the exit.
+
+**The rule says "signal the peer"; there can be two.** A thread's peer and the session
+that delivered the inbound signal need not be the same party, and here they were not.
+The session worked this out unaided. The rule should say so rather than relying on it.
+
+### Status of the verification after this run
+
+Items 1, 2, 3, 4, 5, 6 and 7 have all now run. Items 1–5 and 7 passed on 2026-09-13;
+item 6 passed on 2026-09-14. Item 2 passed with a finding recorded above. No item is
+outstanding.
