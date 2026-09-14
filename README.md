@@ -1,4 +1,4 @@
-# claude-operating-rules
+# claude-plugins
 
 Five Claude Code plugins, of three kinds. Three hold rules that were learned the
 expensive way — each one traceable to a specific failure, with the measurement that

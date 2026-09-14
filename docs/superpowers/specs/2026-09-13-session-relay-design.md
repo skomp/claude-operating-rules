@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-13
 **Status:** approved, not implemented
-**Scope:** a fifth plugin in `claude-operating-rules`
+**Scope:** a fifth plugin in `claude-plugins` (named `claude-operating-rules` when this was written)
 
 ## Problem
 

@@ -1,5 +1,5 @@
 {
-  "name": "claude-operating-rules",
+  "name": "claude-plugins",
   "description": "Operating rules distilled from real failures: prove a claim before you make it, coordinate agents without clobbering each other, and write work down so it can be closed.",
   "owner": {
     "name": "skomp",
