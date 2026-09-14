@@ -190,8 +190,10 @@ Expected: 4 tests PASS.
 `plugin.json` follows the shape of `plugins/agent-operations/.claude-plugin/plugin.json` —
 copy its keys, change the values. Version `0.1.0`.
 
-`valid-session-relay.md` carries prose plus one machine block; use the declaration in Task 2
-Step 3's schema. `no-block.md` carries prose only.
+`valid-session-relay.md` carries prose plus one machine block. **Use the declaration in
+Task 2 Step 1's `VALID` constant** — that is the only complete declaration in this plan —
+with the outer Python triple quotes removed and a paragraph of prose above and below the
+fence. `no-block.md` carries prose only.
 
 - [ ] **Step 6: Commit**
 
@@ -502,13 +504,11 @@ class TestCheckMachine(unittest.TestCase):
         self.assertTrue(any("bystander" in p for p in check_machine(m)))
 
     def test_a_terminal_state_with_an_outgoing_transition_is_reported(self):
-        m = mutate(
-            "- { name: concluded, terminal: true }",
-            "- { name: concluded, terminal: true }\n  - { name: after }",
-        )
-        # concluded is terminal; give it an exit
+        # Give the terminal state `concluded` an exit back to a state that
+        # already exists. No new state, no YAML indentation splice.
+        m = parse(VALID)
         m.transitions.append(type(m.transitions[0])(
-            "concluded", "question", "responder", "after"))
+            "concluded", "question", "responder", "awaiting-triage"))
         self.assertTrue(any("concluded" in p for p in check_machine(m)))
 
     def test_a_machine_with_no_terminal_state_is_reported(self):
@@ -535,9 +535,10 @@ class TestCheckMachine(unittest.TestCase):
         m = mutate('"label.add:session-relay:stalled"', '"run:curl example.com"')
         self.assertTrue(any("run:curl" in p for p in check_machine(m)))
 
-    def test_the_three_permitted_effects_are_accepted(self):
-        m = mutate('"escalate"', '"escalate"')  # unchanged; asserts the baseline
-        self.assertEqual(check_machine(m), [])
+    def test_each_permitted_effect_form_is_accepted(self):
+        for effect in ("escalate", "label.add:anything", "label.remove:anything"):
+            m = mutate('"escalate"', '"%s"' % effect)
+            self.assertEqual(check_machine(m), [], effect)
 ```
 
 - [ ] **Step 2: Run and confirm failure**
