@@ -5,21 +5,55 @@ Paxos on this?"* and *"investigate if I could implement a gossip protocol."*
 **Evaluates** `docs/superpowers/specs/2026-09-14-machines-framework-design.md` as built in
 cycle A. **Status** analysis only; nothing here was implemented or tested.
 
+> ## Correction, same day
+>
+> **The gossip verdict below was wrong, and the reason it was wrong is worth more than the
+> verdict.** The first draft concluded that gossip fails on a *category mismatch*: the framework
+> assumes protocols terminate, gossip does not, therefore gossip is not a conversation this
+> framework can hold.
+>
+> That was an artefact of cycle A's schema, not a property of the framework. Cycle A required a
+> `cap`, required a terminal state, and required every state to reach one — and this evaluation
+> mistook a schema defect for a design boundary.
+>
+> The author corrected it with the right abstraction: **accepting states**, in the automata
+> sense. An accepting state is one where **nothing is owed** — it is fine for the conversation
+> to stop there. A non-accepting state is one where a transition is mandatory to get back to an
+> accepting state. That is a different property from *terminal*, which means nothing further is
+> **possible**.
+>
+> Under it, **gossip's termination objection disappears entirely**: gossip's states are all
+> accepting, it declares no cap, and "every non-accepting state can reach an accepting state" is
+> satisfied vacuously. No fake bound, no pretended ending.
+>
+> **Gossip's real blockers are the two that remain** — digests and version vectors are content,
+> and membership is dynamic. Those are the same two walls Paxos meets, which makes the result
+> tidier than the original draft claimed, not messier.
+>
+> The sections below are left as written, with the mistaken reasoning marked where it appears.
+> The original is kept rather than rewritten so that a reader can see which conclusion came from
+> the framework and which came from a schema that has since been corrected.
+
 ---
 
 ## The short answer
 
-| Protocol family | The exchange | The process |
-|---|---|---|
-| **Paxos** (single-decree) | expressible | not expressible |
-| **Raft / KRaft** | expressible | not expressible |
-| **Gossip / anti-entropy** | expressible | not expressible |
+| Protocol family | The exchange | The process | Blocked by |
+|---|---|---|---|
+| **Paxos** (single-decree) | expressible | not expressible | ballot comparison is content; liveness needs an unattended timer |
+| **Raft / KRaft** | expressible | not expressible | the same, plus election timeouts |
+| **Gossip / anti-entropy** | expressible | not expressible | digests are content; membership is dynamic |
 
-The column split is the finding. **This framework models a bounded conversation: a question, an
-answer, an end.** Consensus and gossip are *continuous processes assembled out of bounded
-exchanges*. The framework can describe the exchange and cannot describe the process.
+The column split is the finding. **The framework can describe an exchange and cannot describe the
+process built out of exchanges.**
 
-That is not three separate gaps. It is one boundary, met three times.
+**One boundary does all three**, and it is not termination — see the correction above. It is
+that a transition fires on a message `kind` and on nothing else. Ballot numbers, version vectors
+and digests are all values, and the framework declines to look at values by construction. Every
+one of these protocols decides on values.
+
+Membership adds a second wall for gossip, and unattended timing adds one for consensus liveness.
+Neither is the primary refusal.
 
 ## What the framework gives a protocol
 
@@ -100,18 +134,28 @@ enforce is that the conclusion was **true**. Structure, never meaning.
 
 Gossip fails in a different place from Paxos, and the difference is worth stating.
 
-### The category mismatch, which is the real finding
+### ~~The category mismatch, which is the real finding~~ — WITHDRAWN, see the correction above
 
-Gossip is not a conversation that ends. It is a continuous process: periodically pick a peer,
-exchange digests, reconcile. Its guarantee is probabilistic convergence over many rounds.
+> **This section was wrong.** It read a defect in cycle A's schema as a boundary of the design.
+> It is kept because the mistake is instructive: an evaluation written against a fresh
+> implementation will inherit that implementation's accidents and present them as necessities.
+> The original text follows.
 
-**Every check the framework performs assumes a protocol terminates.** Terminal states, "every
+~~Gossip is not a conversation that ends. It is a continuous process: periodically pick a peer,
+exchange digests, reconcile. Its guarantee is probabilistic convergence over many rounds.~~
+
+~~**Every check the framework performs assumes a protocol terminates.** Terminal states, "every
 state can reach a terminal state", and the cap all encode *a conversation is a bounded exchange
 that ends*. A gossip machine would have to either declare a cap it does not mean — "ten rounds
-of gossip and then stop" is not gossip — or declare a bound so large it is decorative.
+of gossip and then stop" is not gossip — or declare a bound so large it is decorative.~~
 
-That is a **category mismatch, not a missing feature**. Paxos is refused because it needs to see
-content. Gossip is refused because it is not a conversation.
+~~That is a **category mismatch, not a missing feature**. Paxos is refused because it needs to
+see content. Gossip is refused because it is not a conversation.~~
+
+**What is true instead.** Gossip is a continuous process, and that is fine. Under accepting
+states a gossip machine marks every state accepting, declares no cap, and passes: nothing is ever
+owed, so there is never a non-accepting state to escape. The framework holds continuous protocols
+as readily as bounded ones, and it is the *author* who says which kind theirs is.
 
 ### Membership is the second wall
 
@@ -160,13 +204,22 @@ to be checkable**:
 | What they need | What it would cost |
 |---|---|
 | decisions based on message *values* (ballots, versions, digests) | the content boundary — §4's guarantee that the framework can never *appear* to check meaning |
-| a protocol that does not terminate | the termination check, which is the framework's headline guarantee |
 | unbounded, dynamic membership | decidability — full π-calculus mobility, per §7 |
-| unattended timers | a runtime, which §14's non-goals forbid (the `wait` transport is a partial, attended substitute) |
+| unattended timers | a runtime, which the non-goals forbid (the `wait` transport is a partial, attended substitute) |
 
-Each extension buys a protocol family and sells the install-time check. The spec already says
-the decidability limit and the trust limit are the same limit; this evaluation adds that **the
-expressiveness limit is that same limit a third time.**
+~~a protocol that does not terminate~~ — **withdrawn.** It costs nothing; accepting states give
+it for free, and the first draft of this table was wrong to list it.
+
+Each remaining extension buys a protocol family and sells the install-time check. The spec
+already says the decidability limit and the trust limit are the same limit; this evaluation adds
+that **the expressiveness limit is that same limit a third time.**
+
+**And the one that was not a real cost is worth as much as the three that are.** "Protocols must
+terminate" looked like a principled boundary for as long as nobody asked why. It was a default
+nobody had chosen, shipped in a schema, and it took the author naming the right abstraction —
+accepting states — to see that the framework never needed it. A limit that survives because it
+was never questioned is indistinguishable, from the inside, from one that survives because it is
+necessary.
 
 ## The thing to be careful about
 
