@@ -147,10 +147,19 @@ not mistake a passing backport for evidence that part works.
 
 These cost a day to obtain. Do not re-derive them, and do not soften them.
 
-- **A signal arrives wrapped.** The real form is a fixed lead line, a
+- **A signal arrives wrapped.** The real form is a **variable** lead line, a
   `<cross-session-message from="uds:…sock" from-name="…" from-mode="prompting">` envelope, an
   `<agent-message from="<agentId>">` envelope nested inside **only when a subagent sent it**,
-  and a fixed trailing advisory. A guard must strip the wrapper before matching.
+  and a trailing advisory. A guard must strip the wrapper before matching.
+
+  **The lead line varies with the receiver's state, not the sender.** Measured 2026-09-14:
+  the same sender, the same receiver and the same transport produced
+  `Another Claude session sent a message:` and, forty minutes later,
+  `Another Claude session sent a message while you were working:`. An earlier draft of this
+  handoff called it fixed. **A guard anchored on that line passes every test where the line
+  happens to match and fails in use** — which is the same shape as the wrapper mistake it is
+  meant to prevent. Strip to the `<cross-session-message>` element and test its content;
+  never match the delivered string.
 - **A pane is not evidence.** The Claude Code TUI runs on the alternate screen, so
   `tmux capture-pane -S -` returns about 24 lines regardless of `history-limit`, and tool
   calls are never in the buffer. Only a session's transcript JSONL under `~/.claude/projects/`
