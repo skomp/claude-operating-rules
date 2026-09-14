@@ -96,16 +96,47 @@ class TestCli(unittest.TestCase):
     def test_zero_machines_examined_prints_the_count_not_a_bare_pass(self):
         # A directory that exists but holds no SKILL.md is zero machines
         # found, not a broken tool -- exit 0, and the count must still be
-        # stated. "No collisions found" with no count would be exactly the
-        # evidence-discipline failure this requirement exists to prevent:
-        # a pass that looked at nothing, worded like a pass that checked
-        # something.
+        # stated. What must *not* appear is "No collisions found": a
+        # collision needs a pair, and with zero machines there was no pair
+        # to examine, so the sentence would be a pass that checked nothing
+        # worded like a pass that checked something -- exactly the
+        # evidence-discipline failure this requirement exists to prevent.
         out = io.StringIO()
         with tempfile.TemporaryDirectory() as empty_dir:
             with contextlib.redirect_stdout(out):
                 code = main([empty_dir])
         self.assertEqual(code, 0)
         self.assertIn("Examined 0 machines", out.getvalue())
+        self.assertNotIn("No collisions found", out.getvalue())
+
+    def test_one_machine_examined_claims_no_collision_check(self):
+        # Same reasoning one machine up: a single machine has no peer to
+        # collide with, so the run examined no pair and must not say it
+        # found no collisions.
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = main(["tests/fixtures/valid-session-relay.md"])
+        self.assertEqual(code, 0)
+        self.assertIn("Examined 1 machine", out.getvalue())
+        self.assertNotIn("No collisions found", out.getvalue())
+
+    def test_two_clean_machines_do_claim_no_collisions_found(self):
+        # And the sentence must still appear when it was earned, or the
+        # gate above would just be silence dressed up as discipline.
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("alpha", "beta"):
+                path = os.path.join(d, name + ".md")
+                with open(path, "w") as f:
+                    f.write(VALID.replace("machine: session-relay",
+                                          "machine: " + name)
+                                 .replace('prefix: "session-relay:v1 "',
+                                          'prefix: "%s:v1 "' % name))
+            with contextlib.redirect_stdout(out):
+                code = main([os.path.join(d, "alpha.md"),
+                             os.path.join(d, "beta.md")])
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertIn("Examined 2 machines", out.getvalue())
         self.assertIn("No collisions found", out.getvalue())
 
     def test_a_malformed_declaration_exits_1_not_2(self):

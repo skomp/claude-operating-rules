@@ -116,7 +116,13 @@ def main(argv):
     if report.collisions:
         for a, b in report.collisions:
             print("collision: %s and %s claim an overlapping prefix" % (a, b))
-    else:
+    elif report.examined >= 2:
+        # Only a claim the run actually earned. A collision needs two
+        # machines, so with fewer than two there was no pair to examine --
+        # "No collisions found" would then be a pass that checked nothing,
+        # worded like a pass that checked something. The `Examined N
+        # machines` line above still prints, always, so a run that found
+        # nothing to compare says so rather than going silent.
         print("No collisions found")
 
     found_a_problem = bool(load_problems) or bool(report.problems) or bool(report.collisions)

@@ -10,6 +10,7 @@ from machines.pattern import (
     Star,
     Empty,
     NFA,
+    _MAX_NFA_STATES,
     _complement,
     _merge_ranges,
 )
@@ -117,8 +118,8 @@ class TestParsePattern(unittest.TestCase):
     # syntactic forms that are visible without compiling anything.
     #
     # The general form (a*, a? at top level are also nullable) needs the
-    # compiled NFA and is Task 5's job, not this parser's -- see the
-    # module docstring in pattern.py.
+    # compiled NFA, so it belongs to compile_pattern, not to this parser
+    # -- see the module docstring in pattern.py.
 
     def test_rejects_the_empty_pattern(self):
         with self.assertRaises(PatternError):
@@ -202,8 +203,9 @@ class TestParsePattern(unittest.TestCase):
 
 class TestComplementHelper(unittest.TestCase):
     """Point 1: character-class complement is the defect most likely to
-    survive into Task 6, where it becomes a wrong collision verdict rather
-    than a visible crash. Test it directly, not just through parse_pattern.
+    survive into `patterns_collide`, where it becomes a wrong collision
+    verdict rather than a visible crash. Test it directly, not just
+    through parse_pattern.
     """
 
     FULL = (0, 0x10FFFF)
@@ -255,8 +257,8 @@ class TestMergeRangesHelper(unittest.TestCase):
 
 
 class TestCompilePattern(unittest.TestCase):
-    """From Task 5's brief. `accepts` matches the whole string -- the
-    prefix semantics (L(a).Sigma*) are Task 6's job, not this module's; see
+    """`accepts` matches the whole string -- the prefix semantics
+    (L(a).Sigma*) belong to `product.py`, not to this module; see
     NFA.accepts's docstring.
     """
 
@@ -298,8 +300,8 @@ class TestCompilePattern(unittest.TestCase):
 
     # --- the node-sharing defect ---
     #
-    # Task 4 desugars `x+` to Cat(x, Star(x)) using the *same* AST object
-    # in both positions (pattern.py:324, in _parse_rep). A compiler that
+    # The parser desugars `x+` to Cat(x, Star(x)) using the *same* AST
+    # object in both positions (_parse_rep). A compiler that
     # memoises Thompson fragments by node identity -- or by id(), or by
     # relying on Node.__eq__ making structurally-equal nodes interchangeable
     # -- would wire both occurrences of `x` to a single shared fragment
@@ -320,11 +322,11 @@ class TestCompilePattern(unittest.TestCase):
 
     # --- the general nullability check (point 2 in the dispatch) ---
     #
-    # Task 4 only rejects the two *syntactic* forms of an empty match
-    # ("" and an empty alternation branch). `a*`, `a?`, `(a|)` and `(ab)*`
-    # are all nullable at top level but parse fine -- compile_pattern must
-    # catch them by inspecting the compiled NFA's epsilon-closure of its
-    # start state against its accept set. A pattern that can match empty
+    # The parser only rejects the two *syntactic* forms of an empty match
+    # ("" and an empty alternation branch, both in _parse_cat). `a*`, `a?`
+    # and `(ab)*` are all nullable at top level but parse fine --
+    # compile_pattern must catch them by inspecting the compiled NFA's
+    # epsilon-closure of its start state against its accept set. A pattern that can match empty
     # means L(a).Sigma* becomes Sigma*: it would collide with every other
     # installed machine while every other check still passes.
 
@@ -337,12 +339,20 @@ class TestCompilePattern(unittest.TestCase):
             compile_pattern("a?")
 
     def test_rejects_an_empty_branch_via_trailing_alternation_in_a_group(self):
-        # (a|) is Alt(a, Empty()) once the group is parsed -- an empty
-        # branch guarded by Task 4's syntactic check only when it appears
-        # as a *raw* alternation branch, not when it arrives via the `?`
-        # desugaring's own Alt(x, Empty()). Both must still be caught here.
-        with self.assertRaises(PatternError):
+        # CORRECTION: this comment used to claim `(a|)` is caught by the
+        # compiled nullability check. It is not. `_parse_cat` reaches the
+        # `)` having consumed zero reps and raises "empty alternation
+        # branch at position 3" before any NFA is built -- the same
+        # syntactic check that rejects `a|`, just one nesting level in.
+        # The test is still worth keeping (an empty branch inside a group
+        # must be rejected however it is reached), but it is evidence
+        # about `_parse_cat`, not about compile_pattern, and a reader who
+        # believed the old comment would think the nullability check had
+        # coverage it does not have. `a*`, `a?` and `(ab)*` above are that
+        # check's real coverage.
+        with self.assertRaises(PatternError) as ctx:
             compile_pattern("(a|)")
+        self.assertIn("empty alternation branch", str(ctx.exception))
 
     def test_rejects_a_nullable_group_under_star(self):
         with self.assertRaises(PatternError):
@@ -353,7 +363,7 @@ class TestCompilePattern(unittest.TestCase):
         # pattern, not "does it contain a Star anywhere".
         self.assertIsNotNone(compile_pattern("a(b*)c"))
 
-    # --- the NFA contract Task 6 depends on ---
+    # --- the NFA contract `product.py` depends on ---
 
     def test_nfa_exposes_the_documented_contract_shape(self):
         nfa = compile_pattern("ab")
@@ -374,6 +384,54 @@ class TestCompilePattern(unittest.TestCase):
         for state, targets in nfa.epsilon.items():
             self.assertIsInstance(state, int)
             self.assertIsInstance(targets, set)
+
+
+class TestStateCeiling(unittest.TestCase):
+    """Thompson construction here allocates fresh states per *occurrence*
+    of a node, which is required for correctness (see the node-sharing
+    tests above) and is also what makes nested repetition exponential:
+    `x+` compiles Cat(x, Star(x)) with two independent copies of `x`, so
+    each further level of `+` roughly doubles the state count.
+
+    Measured on this compiler with the ceiling lifted: the 52-character
+    pattern `a` wrapped in `+` seventeen times compiles to 524,286 states
+    in 0.80s, and twenty-two levels extrapolates to about 8.4 million. No
+    message prefix needs that, and a checker whose job is to name what is
+    wrong must say so rather than allocate until the process dies.
+    """
+
+    def nested_plus(self, depth):
+        src = "a"
+        for _ in range(depth):
+            src = "(%s)+" % src
+        return src
+
+    def test_a_deeply_nested_plus_is_rejected_by_name(self):
+        with self.assertRaises(PatternError) as ctx:
+            compile_pattern(self.nested_plus(17))
+        self.assertIn(str(_MAX_NFA_STATES), str(ctx.exception))
+
+    def test_the_rejection_is_immediate_not_after_the_explosion(self):
+        # The point of a ceiling is that it stops allocation, not that it
+        # reports afterwards. Twenty-five levels is ~67 million states
+        # unbounded; this must return in the time 10,000 states take.
+        import time
+        start = time.time()
+        with self.assertRaises(PatternError):
+            compile_pattern(self.nested_plus(25))
+        self.assertLess(time.time() - start, 1.0)
+
+    def test_an_ordinary_message_prefix_is_nowhere_near_the_ceiling(self):
+        # The ceiling must not be a tax on real declarations. A literal
+        # prefix costs two states per character, so the shipped fixture's
+        # prefix uses 34 of 10,000.
+        nfa = compile_pattern("session-relay:v1 ")
+        self.assertLess(len(nfa.moves), _MAX_NFA_STATES // 100)
+
+    def test_a_moderate_nested_plus_still_compiles(self):
+        # And it must not reject repetition as such: five levels is 126
+        # states, well inside the limit.
+        self.assertIsNotNone(compile_pattern(self.nested_plus(5)))
 
 
 if __name__ == "__main__":

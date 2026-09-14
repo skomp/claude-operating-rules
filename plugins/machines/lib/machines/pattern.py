@@ -8,18 +8,18 @@ named groups, no shorthand classes.
 
 The restriction exists because the installer's central guarantee -- that no
 two installed machines can claim the same message -- is decided by
-intersecting two compiled automata (Task 6). That only works if every prefix
-pattern is a *regular* language. A backreference (`(a)\\1`) or lookaround
-is not regular; a pattern containing one could be accepted here, sail through
-every other check, and the guarantee would silently stop holding for that
-one machine. Parse time is the only place this can be caught, so it is
-caught here, loudly, by name, rather than surfacing later as a wrong
-collision verdict.
+intersecting two compiled automata (`product.py`). That only works if
+every prefix pattern is a *regular* language. A backreference (`(a)\\1`)
+or lookaround is not regular; a pattern containing one could be accepted
+here, sail through every other check, and the guarantee would silently stop
+holding for that one machine. Parse time is the only place this can be
+caught, so it is caught here, loudly, by name, rather than surfacing later
+as a wrong collision verdict.
 
 This module knows nothing about protocols, machines, or messages -- it is a
-standalone grammar-to-AST parser, tested as one. It is Task 5's job to
-compile the AST this module produces into an NFA, and Task 6's job to
-intersect two of those NFAs.
+standalone grammar-to-AST parser and a Thompson NFA compiler for what that
+parser produces, tested as two separate things. Intersecting two of those
+NFAs is `product.py`'s job.
 
 Grammar::
 
@@ -53,8 +53,8 @@ valid escapes to a literal brace (both are in `_METACHARACTERS`).
 
 AST node types: `Lit`, `Cat`, `Alt`, `Star`, `Empty` -- five, not seven,
 because the parser desugars `+` to `Cat(x, Star(x))` and `?` to
-`Alt(x, Empty())` rather than inventing Plus/Opt node types. Task 5's NFA
-builder therefore only ever has to handle Cat, Alt, and Star.
+`Alt(x, Empty())` rather than inventing Plus/Opt node types. The NFA
+compiler below therefore only ever has to handle Cat, Alt, and Star.
 """
 
 import re
@@ -95,8 +95,8 @@ class PatternError(DeclarationError):
 # --- AST ---------------------------------------------------------------
 #
 # Plain classes (matching the style already used for Machine/State/
-# Transition in machine.py), with value equality so tests -- and later,
-# Task 5's compiler -- can compare ASTs structurally instead of by identity.
+# Transition in machine.py), with value equality so tests -- and the
+# compiler below -- can compare ASTs structurally instead of by identity.
 
 
 class Node(object):
@@ -185,8 +185,8 @@ class Empty(Node):
 #
 # Kept separate from the parser and tested directly (TestComplementHelper /
 # TestMergeRangesHelper in test_pattern.py): an off-by-one here is the
-# defect most likely to survive into Task 6, where it would silently
-# produce a wrong collision verdict instead of a visible crash.
+# defect most likely to survive into `product.py`, where it would
+# silently produce a wrong collision verdict instead of a visible crash.
 
 
 def _merge_ranges(ranges):
@@ -453,15 +453,15 @@ class _Parser(object):
         return (ord(lo), ord(hi))
 
 
-# --- NFA compiler (Task 5) -----------------------------------------------
+# --- NFA compiler ---------------------------------------------------------
 #
 # Thompson construction from the AST above into an NFA over Unicode
 # codepoint ranges. The representation is a contract, not a private
-# choice: Task 6 intersects two of these NFAs directly, reading `moves`
-# and `epsilon` as plain dicts/lists/sets rather than through any method
-# on this class.
+# choice: `product.py` intersects two of these NFAs directly, reading
+# `moves` and `epsilon` as plain dicts/lists/sets rather than through any
+# method on this class.
 #
-# One thing the AST forces on this compiler: Task 4 desugars `x+` to
+# One thing the AST forces on this compiler: the parser desugars `x+` to
 # Cat(x, Star(x)) and `x?` to Alt(x, Empty()) using the *same* node object
 # in both positions of the Cat/Alt (see _parse_rep above). Node also
 # defines value equality (__eq__/__hash__), so two structurally-identical
@@ -473,19 +473,38 @@ class _Parser(object):
 # one fragment referenced twice. This compiler never memoises by node
 # identity, by id(), or via a dict keyed on nodes -- it walks the tree
 # and allocates fresh states on every visit, full stop.
+#
+# That is correct, and it is also why a ceiling is needed. Allocating fresh
+# states per occurrence means nested repetition duplicates a subtree on
+# every level: `x+` compiles both halves of Cat(x, Star(x)) independently,
+# so wrapping a pattern in `+` roughly doubles its state count. Measured on
+# this compiler: a 52-character pattern nesting `+` seventeen deep compiles
+# to 524,286 states in 0.80s, and each further level doubles that again --
+# twenty-two deep is around 8.4 million. No legitimate message prefix needs
+# anything near this, and the honest answer to one that does is to say so
+# by name rather than to allocate until the process dies. Restructuring `+`
+# into its own node type would remove the duplication, but that is a sixth
+# AST node for a later cycle's compiler to carry; the ceiling is the cheap
+# fix and changes no contract.
+
+# The state ceiling. Generous by the standard of a message prefix: a plain
+# literal prefix costs two states per character, so this allows a
+# five-thousand-character literal. What it stops is nested repetition,
+# which reaches it in about a dozen levels.
+_MAX_NFA_STATES = 10000
 
 
 class NFA(object):
     """A Thompson-constructed nondeterministic finite automaton over
     Unicode codepoint ranges.
 
-    Attributes (this shape is the contract Task 6 depends on):
+    Attributes (this shape is the contract `product.py` depends on):
 
     - `start`: int -- the id of the start state.
     - `accept`: Set[int] -- ids of accepting states. Thompson construction
       as done here always produces exactly one, but the type is a set so
-      Task 6's intersection (which will generally have several) does not
-      need a different shape.
+      `product.py`'s intersection (which will generally have several)
+      does not need a different shape.
     - `moves`: Dict[int, List[Tuple[FrozenSet[Tuple[int, int]], int]]] --
       for each state, the list of (charset, target) character moves out of
       it. `charset` is a frozenset of inclusive (low, high) codepoint
@@ -524,20 +543,21 @@ class NFA(object):
         """Whether this NFA matches `text` exactly -- the whole string,
         not a prefix.
 
-        This exists only so Task 5 can be tested against strings, where a
-        wrong answer is obvious, rather than against another automaton,
-        where it usually isn't. It is not part of the installer's
-        collision check: a message prefix pattern `a` is meant to match
-        any message that *starts with* something in L(a), i.e. the
-        language L(a).Sigma* -- but that Sigma*-suffix semantics belongs
-        to Task 6, where the checker builds it once and intersects. Doing
-        it here too would double-apply it (every pattern would effectively
-        become L(a).Sigma*.Sigma*, which happens to be the same language,
-        masking the bug) and, worse, would make this method answer a
-        different question than the one Task 6 actually asks, so a
-        passing `accepts` test here would say nothing about Task 6 being
-        correct. Whole-string matching is a strictly narrower question,
-        which is exactly why it is useful as a test oracle.
+        This exists only so the compiler can be tested against strings,
+        where a wrong answer is obvious, rather than against another
+        automaton, where it usually isn't. It is not part of the
+        installer's collision check: a message prefix pattern `a` is meant
+        to match any message that *starts with* something in L(a), i.e.
+        the language L(a).Sigma* -- but that Sigma*-suffix semantics
+        belongs to `product.py`, where the checker builds it once and
+        intersects. Doing it here too would double-apply it (every pattern
+        would effectively become L(a).Sigma*.Sigma*, which happens to be
+        the same language, masking the bug) and, worse, would make this
+        method answer a different question than the one `product.py`
+        actually asks, so a passing `accepts` test here would say nothing
+        about `patterns_collide` being correct. Whole-string matching is a
+        strictly narrower question, which is exactly why it is useful as a
+        test oracle.
         """
         current = self.epsilon_closure({self.start})
         for ch in text:
@@ -578,6 +598,14 @@ class _Compiler(object):
         self.epsilon = {}
 
     def new_state(self):
+        if self._next_state >= _MAX_NFA_STATES:
+            raise PatternError(
+                "pattern is too complex: compiling it needs more than %d NFA "
+                "states. Nested '+' or '*' repetition duplicates a subtree on "
+                "every level (x+ is compiled as Cat(x, Star(x)), with fresh "
+                "states for each occurrence of x), so a short pattern can "
+                "compile to millions of states" % _MAX_NFA_STATES
+            )
         state = self._next_state
         self._next_state += 1
         self.moves[state] = []
@@ -661,7 +689,8 @@ def compile_pattern(src):
     branch, this one catches every nullable pattern regardless of shape:
     `a*`, `a?`, `(a|)`, `(ab)*` at top level all parse fine and all reach
     here. It matters because a message-prefix pattern is matched as
-    L(pattern).Sigma* (Task 6): if L(pattern) contains the empty string,
+    L(pattern).Sigma* (see `product.py`): if L(pattern) contains the empty
+    string,
     L(pattern).Sigma* is exactly Sigma*, i.e. the pattern claims *every*
     message. That machine would then collide with every other installed
     machine -- while every other well-formedness check still passes, so
