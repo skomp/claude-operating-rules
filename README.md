@@ -27,7 +27,7 @@ Two steps, typed into Claude Code. Nothing here installs itself.
 **1. Add this marketplace.** Once per machine:
 
 ```
-/plugin marketplace add skomp/claude-operating-rules
+/plugin marketplace add skomp/claude-plugins
 ```
 
 **2. Install the plugins you want.** Each is packaged separately on purpose, so taking one

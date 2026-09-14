@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "description": "File a fault against the repository that owns it and signal the session bound there, or answer an inbound `session-relay:` signal, without ever editing a repository you are not bound to.",
   "author": { "name": "skomp", "url": "https://github.com/skomp" },
-  "homepage": "https://github.com/skomp/claude-operating-rules",
-  "repository": "https://github.com/skomp/claude-operating-rules",
+  "homepage": "https://github.com/skomp/claude-plugins",
+  "repository": "https://github.com/skomp/claude-plugins",
   "license": "MIT",
   "keywords": ["sessions", "coordination", "github-issues", "cross-repo", "signals"]
 }

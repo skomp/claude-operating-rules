@@ -72,7 +72,7 @@ Copied verbatim from the spec. Every task's requirements implicitly include thes
 | Skill frontmatter keys | `name` (bare) and `description` (double-quoted, single line). Nothing else. |
 | `plugin.json` keys | `name`, `version`, `description`, `author`, `homepage`, `repository`, `license`, `keywords`. There is **no** `skills` key; skills are discovered from `skills/`. |
 | `author` value | `{ "name": "skomp", "url": "https://github.com/skomp" }` |
-| `homepage` and `repository` | `https://github.com/skomp/claude-operating-rules` |
+| `homepage` and `repository` | `https://github.com/skomp/claude-plugins` — the repository was named `claude-operating-rules` when this plan ran and was renamed afterwards; the value above is the current one, because the check below asserts it |
 | `license` | `MIT` |
 | Starting `version` | `0.1.0` |
 | `marketplace.json` plugin entry keys | `name`, `source`, `version`, `category`, `description`, `author` |
@@ -117,7 +117,7 @@ assert p['name']=='session-relay' and p['version']==e['version']
 assert p['version']=='0.1.0', p['version']
 assert p['author']=={'name':'skomp','url':'https://github.com/skomp'}, p['author']
 assert p['license']=='MIT'
-assert p['homepage']==p['repository']=='https://github.com/skomp/claude-operating-rules'
+assert p['homepage']==p['repository']=='https://github.com/skomp/claude-plugins'
 assert e['source']=='./plugins/session-relay' and e['category']=='development'
 assert p['description']!=e['description'], "the two descriptions serve different readers"
 print("PASS")
