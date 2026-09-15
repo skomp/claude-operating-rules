@@ -5,8 +5,7 @@ prose that explains it. `machines.declaration.parse(text)` turns that block into
 It is a closed language — no expressions, no scripts, no callbacks — so every field below is
 one of the eleven the parser accepts. **Any other top-level field is rejected by name**, not
 silently ignored: a publisher who writes `caps: 10` is told about `caps`, not handed a machine
-with a default cap they never asked for. One of the eleven, `registers`, is accepted and
-parsed into nothing yet, and this document does not cover it.
+with a default cap they never asked for.
 
 Every field in this document is required unless its section says otherwise. A required
 field that is missing is rejected by name, the same as an unknown one. **`cap`, `fields`,
@@ -204,6 +203,112 @@ fields:
   ballot: int
   blocking: bool
 ```
+
+## `registers`
+
+**Type:** mapping of register name to its fold declaration. **Optional.** Absent or empty
+means this machine remembers nothing across the trace.
+
+A register is one remembered scalar: a value folded from every message of the right kind
+that has arrived so far, seeded at a stated starting value. It exists so that a guard (a
+later cycle) can compare a field on the message just arrived against something the protocol
+has already seen — the highest ballot promised so far, say — without a publisher hand-rolling
+that bookkeeping in prose nobody checks.
+
+**A register is a declaration of how a scalar would be folded, not the fold itself.** Nothing
+in this document, or in cycle A's checker, evaluates a guard, folds a trace, or reads a
+channel — that is cycle B's engine. `check_machine` only checks that a register's declaration
+is internally consistent with the rest of the machine; see the four checks below.
+
+Each register is a mapping with exactly these four keys, all required:
+
+- **`fold`** — how the register combines a new field reading with what it already remembers.
+  One of `max` or `last` (see "The two folds, and why not more" below).
+- **`field`** — the name of the declared header field (see `fields`, above) whose value is
+  read on every message that feeds this register. `check_machine` checks that this names a
+  field actually declared — a register folding something the machine never said a message
+  carries would otherwise be caught nowhere.
+- **`on`** — a non-empty list of declared kinds. A message of any other kind leaves the
+  register untouched. `check_machine` checks that every entry names a declared kind — the
+  same failure the unused-kind check answers, from the other side: a register fed by a
+  message the protocol cannot receive.
+- **`initial`** — the value the register holds before any matching message has arrived. An
+  `int` or a `bool`. `check_machine` checks that its Python type agrees with the field's
+  declared type (an `int` field takes an `int` initial, not a `bool`; a `bool` field takes a
+  `bool`) — a register that starts life as a value the comparison cannot order would
+  otherwise reach a guard as a type error with nothing in the declaration to point at.
+
+A fifth check, not yet shippable: a register no guard names anywhere is reported. It cannot
+be written until guards exist.
+
+**A register's name must not also be a declared field's name.** The two live in the same
+namespace (`NAME`, the pattern `fields` uses too — see that section), and a guard compares
+one against the other by name; a register and a field sharing a name would make a guard's two
+sides ambiguous to a human reader, which is the exact failure this syntax exists to prevent.
+
+```yaml
+fields:
+  ballot: int
+registers:
+  highest_promised: { fold: max, field: ballot, on: [prepare], initial: 0 }
+```
+
+### Why `on` is required and non-empty
+
+A reader needs to see which messages move the remembered value without cross-referencing
+every transition by hand. An empty (or absent) `on` would be a register that never updates —
+a constant, smuggled in through a degenerate fold instead of declared as what it is.
+Comparing a field against a literal constant is not expressible here at all: that is a
+**stated gap**, not a feature this shape happens to also provide. A publisher who wants it
+has to wait for it to be designed on purpose.
+
+### Why there is no `type` on a register
+
+A register's type is its field's type — enforced by the `initial` check above, and true for
+the register's entire life once a machine passes `check_machine` (see "The two folds" below).
+Giving a register its own `type` key would be a second place to say the same thing, and a
+second place to disagree with the first.
+
+### The two folds, and why not more
+
+`FOLDS = ("max", "last")`. Closed on purpose, the same reason `fields`'s type vocabulary is
+closed: an open fold word would let a publisher declare a register the engine cannot evaluate,
+and the failure would surface far from the declaration that caused it.
+
+A register remembers **one scalar**, seeded at `initial`, updated by **exactly one field read
+per matching step**: conceptually, `register = fold(register, message.field)` for every
+message whose kind is in `on`. `max` and `last` both fit that shape, and both keep the
+register's value the same type as the field across every step — `max` because comparing two
+values of one type yields a value of that same type, `last` because it never combines
+anything, it only replaces the old value with the new reading. That is what makes the
+`initial`-versus-field type check above a promise good for the register's whole life, not just
+its first moment.
+
+**`min` and `first`** are the mirror images of `max` and `last`, and would fit the same shape
+just as well. Neither is declared here because nothing in this cycle needs one: the vocabulary
+stays closed to what has an actual protocol behind it (`highest_promised`, tracked by `max`,
+is the paxos-acceptor fixture's own register) rather than growing speculatively ahead of a
+concrete use — the same restraint that kept `string` out of `fields`'s type vocabulary.
+
+**`count` and `sum`** are excluded for a sharper reason: both would break the type-preservation
+property above. `count` doesn't read the field's value at all — it folds the presence of a
+matching message, not anything the message carries — so declaring a `field` against it would
+name a key the fold never consults. `sum` folds arithmetically without regard to the field's
+type, and a running sum of a `bool` field is not itself a `bool` (`True + True` is `2`, an
+`int`) — exactly the type mismatch `check_machine`'s `initial`-versus-field check exists to
+catch, except this time the mismatch would appear only after the fold had run, where nothing
+here can catch it at parse time or at check time either.
+
+### The fold/argmax boundary
+
+**`argmax` is deliberately not in `FOLDS`, and is the fold most likely to be reached for
+next.** It does not fit the one-remembered-scalar shape above: "the message that produced the
+maximum" is a second value remembered alongside the scalar — which message, or which of its
+other fields, broke the tie — and that second value is not in general an `int` or a `bool`
+either. Admitting `argmax` means admitting a second remembered value and a second type for it,
+which is a larger feature than one more string in a tuple, and it should be designed on
+purpose rather than backed into. `plugins/machines/lib/machines/machine.py`'s `check_machine`
+carries this same reasoning next to the R1-R4 checks, for a reader who gets there first.
 
 ## `cap`
 

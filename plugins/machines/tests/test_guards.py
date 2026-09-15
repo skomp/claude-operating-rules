@@ -2,6 +2,7 @@ import unittest
 
 from machines.declaration import parse
 from machines.errors import DeclarationError
+from machines.machine import check_machine
 from tests.test_declaration import VALID  # the known-good declaration
 
 
@@ -32,9 +33,9 @@ from tests.test_declaration import VALID  # the known-good declaration
 # are all parse-level.
 GUARDED = """
 The paxos-acceptor protocol carries a single Paxos ballot number as a
-declared header field. `registers` below is tolerated and parsed into
-nothing until Task 4 gives the key meaning; this task is only about the
-`fields` block -- the `ballot: int` line nothing yet guards on.
+declared header field, and one register -- `highest_promised` -- that
+folds it by `max` over `prepare` messages. Nothing guards on it yet: no
+transition below carries a `guard:` mapping until Task 5 adds one.
 
 ```machine
 machine: paxos-acceptor
@@ -117,6 +118,83 @@ class TestFields(unittest.TestCase):
         m = parse(splice_guarded(
             "ballot: int", "ballot: int\n  blocking: bool"))
         self.assertEqual(m.fields["blocking"].type, "bool")
+
+
+class TestRegisters(unittest.TestCase):
+    def test_a_register_lands_with_its_fold_field_kinds_and_initial(self):
+        r = parse(GUARDED).registers["highest_promised"]
+        self.assertEqual(r.fold, "max")
+        self.assertEqual(r.field, "ballot")
+        self.assertEqual(r.on, ["prepare"])
+        self.assertEqual(r.initial, 0)
+
+    def test_an_unknown_fold_is_rejected(self):
+        # `count` doesn't read the field it is declared against at all --
+        # a register's `field` names what it folds, and a count folds the
+        # presence of a matching message, not any value the message
+        # carries. Naming a `field` on a count would be a key the fold
+        # never consults.
+        #
+        # `argmax` needs a second remembered value (which message, or
+        # which of its other fields, produced the maximum) alongside the
+        # scalar -- a second thing to remember, not a bigger fold over
+        # the one a register holds. See the fold/argmax boundary comment
+        # next to the R1-R4 checks in `check_machine`.
+        for bad in ("count", "argmax", "sum", "min", "first"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(DeclarationError) as ctx:
+                    parse(splice_guarded("fold: max", "fold: " + bad))
+                self.assertEqual(ctx.exception.field, "registers")
+
+    def test_an_empty_on_list_is_rejected(self):
+        with self.assertRaises(DeclarationError) as ctx:
+            parse(splice_guarded("on: [prepare]", "on: []"))
+        self.assertEqual(ctx.exception.field, "registers")
+
+    def test_a_register_on_an_undeclared_field_is_reported(self):
+        m = parse(splice_guarded("field: ballot", "field: nope"))
+        problems = check_machine(m)
+        self.assertTrue(
+            any("highest_promised" in p and "nope" in p for p in problems),
+            problems)
+
+    def test_a_register_fed_by_an_undeclared_kind_is_reported(self):
+        m = parse(splice_guarded("on: [prepare]", "on: [shouting]"))
+        problems = check_machine(m)
+        self.assertTrue(
+            any("highest_promised" in p and "shouting" in p
+                for p in problems),
+            problems)
+
+    def test_a_bool_initial_on_an_int_field_is_reported(self):
+        m = parse(splice_guarded("initial: 0", "initial: true"))
+        problems = check_machine(m)
+        self.assertTrue(
+            any("highest_promised" in p for p in problems), problems)
+
+    def test_an_int_initial_on_a_bool_field_is_reported(self):
+        # Two splices: add a bool field, then point the register at it,
+        # leaving `initial: 0` (an int) untouched. Same fail-loudly
+        # discipline as `splice_guarded`, applied twice by hand since a
+        # single `splice_guarded` call only carries one substitution.
+        text = GUARDED
+        assert "fields:\n  ballot: int" in text, \
+            "fixture drifted: 'fields:\\n  ballot: int' not found"
+        text = text.replace(
+            "fields:\n  ballot: int", "fields:\n  ballot: int\n  blocking: bool")
+        assert "field: ballot" in text, \
+            "fixture drifted: 'field: ballot' not found"
+        text = text.replace("field: ballot", "field: blocking")
+        m = parse(text)
+        problems = check_machine(m)
+        self.assertTrue(
+            any("highest_promised" in p for p in problems), problems)
+
+    def test_a_register_sharing_a_name_with_a_field_is_reported(self):
+        m = parse(splice_guarded("highest_promised", "ballot"))
+        problems = check_machine(m)
+        self.assertTrue(
+            any("ballot" in p and "field" in p for p in problems), problems)
 
 
 if __name__ == "__main__":

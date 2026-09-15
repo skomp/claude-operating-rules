@@ -13,21 +13,18 @@ from .pattern import PatternError, compile_pattern
 #
 # `fields` and `registers` are optional the same way: a protocol with
 # nothing to guard on declares neither, and gets an empty mapping rather
-# than a required field it never wanted. `registers` is tolerated here
-# (accepted, parsed into nothing) so that a declaration carrying it does
-# not raise "unknown field" before Task 4 gives the key itself meaning.
+# than a required field it never wanted.
 FIELDS = ("machine", "version", "prefix", "roles", "kinds", "fields",
           "registers", "cap", "initial", "states", "transitions")
 REQUIRED = tuple(f for f in FIELDS if f not in ("cap", "fields", "registers"))
 
 _INFINITY = float("inf")
 
-# A declared header field's name. Reused unchanged for register names
-# (Task 4): both live in the same namespace a publisher writes into, and
-# both must stay out of the dotted `envelope.*` namespace a later cycle
-# reserves for the message envelope itself (the Lamport clock among it) --
-# forbidding `.` here is what keeps a declared field from ever colliding
-# with it.
+# A declared header field's name, reused unchanged for register names:
+# both live in the same namespace a publisher writes into, and both must
+# stay out of the dotted `envelope.*` namespace a later cycle reserves for
+# the message envelope itself (the Lamport clock among it) -- forbidding
+# `.` here is what keeps a declared field from ever colliding with it.
 NAME = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 # The closed set of types a declared field may carry. Closed on purpose:
@@ -52,6 +49,43 @@ class Field(object):
     def __init__(self, name, type):
         self.name = name
         self.type = type
+
+
+# The closed set of ways a register may fold a field's value across a
+# trace. Closed for the same reason `FIELD_TYPES` is: an open fold word
+# would let a publisher declare a register that cycle B's engine (the
+# fold itself is cycle B's job; this schema only declares its shape)
+# cannot evaluate, and the failure would surface far from the declaration
+# that caused it. See the comment on the R1-R4 checks in `check_machine`
+# for the fold/argmax boundary this set is drawn at, and SCHEMA.md's
+# `registers` section for why `min`, `first`, `count` and `sum` are not
+# here either.
+FOLDS = ("max", "last")
+
+
+class Register(object):
+    """A declared register: one remembered scalar, folded from the trace.
+
+    `fold` is one of `FOLDS`. `field` names the declared header field
+    (see `Field`, above) whose value is read on every matching message.
+    `on` is the non-empty list of kinds that feed the register -- a
+    message of any other declared kind leaves it untouched. `initial` is
+    the value the register holds before any matching message has arrived,
+    an `int` or a `bool`, and (once a machine has passed `check_machine`)
+    the same Python type as the field it folds.
+
+    This class only declares the fold; it does not perform one. Nothing
+    in cycle A reads a channel, folds a trace, or evaluates a guard --
+    that is cycle B's engine. A `Register` is what a guard (cycle B) will
+    compare a field against once one exists.
+    """
+
+    def __init__(self, name, fold, field, on, initial):
+        self.name = name
+        self.fold = fold
+        self.field = field
+        self.on = on
+        self.initial = initial
 
 
 class State(object):
@@ -95,7 +129,7 @@ class Transition(object):
 
 class Machine(object):
     def __init__(self, name, version, prefix, roles, kinds, cap,
-                 initial, states, transitions, fields=None):
+                 initial, states, transitions, fields=None, registers=None):
         self.name = name
         self.version = version
         self.prefix = prefix
@@ -110,6 +144,9 @@ class Machine(object):
         # iterable and indexable, the same reasoning `Transition.effects`
         # already applies to `effects=None`.
         self.fields = fields if fields is not None else {}
+        # Dict[str, Register], keyed by register name. Defaults to `{}`
+        # for the same reason `fields` does.
+        self.registers = registers if registers is not None else {}
 
 
 # `prefix` is not just a string -- it is source text pattern.py compiles to
@@ -372,6 +409,66 @@ def check_machine(m):
     fired_on = set(t.on for t in m.transitions)
     for kind in sorted(set(m.kinds) - fired_on):
         problems.append("kind %r is declared but no transition fires on it" % kind)
+
+    # Registers: R1-R4. `declaration.parse` already enforced everything
+    # about a register's own shape (a mapping, a `NAME`-shaped key,
+    # exactly the four keys `fold`/`field`/`on`/`initial`, `fold` in
+    # `FOLDS`, `on` a non-empty list of strings, `initial` an `int` or a
+    # `bool`); what is left is cross-referencing one register's
+    # declaration against `fields` and `kinds`, both declared elsewhere
+    # in the same document, which is exactly what a parser -- reading one
+    # key at a time -- cannot do.
+    #
+    # R3 is skipped for a register whose `field` is itself undeclared
+    # (R1 already fired): there is no field type left to compare
+    # `initial` against, the same reason the reachability and cap checks
+    # below are skipped when `initial` (the state) is undeclared.
+    #
+    # The fold/argmax boundary, recorded here because a later session
+    # reaching for `argmax` will look here first. A register remembers
+    # one scalar, seeded at `initial`, and updated by exactly one field
+    # read per matching step: conceptually, `register = fold(register,
+    # message.field)` for every message whose kind is in `on`. `max` and
+    # `last` both fit that shape, and both keep the register's value the
+    # same Python type as the field across every step -- `max` because
+    # comparing two values of the same type produces one of that same
+    # type, `last` because it never combines anything, it only replaces.
+    # That is what makes R3's type check ("`initial`'s type matches the
+    # field's declared type") a promise that holds for the register's
+    # entire life, not just at the start.
+    #
+    # `argmax` does not fit the shape: "the message that produced the
+    # maximum" is a second value remembered alongside the scalar -- which
+    # message, or which of its other fields -- and that second value is
+    # not in general an `int` or a `bool` either. Admitting `argmax`
+    # would mean admitting a second remembered value and a second type
+    # for it, which is a different, larger feature than a bigger fold
+    # over the one scalar this schema declares. `FOLDS` stays closed to
+    # `max` and `last` until that is designed on purpose, not backed into
+    # by one more string in a tuple.
+    for name in sorted(m.registers):
+        r = m.registers[name]
+        field_declared = r.field in m.fields
+        if not field_declared:                                        # R1
+            problems.append(
+                "register %r names undeclared field %r" % (name, r.field))
+        for kind in r.on:                                              # R2
+            if kind not in m.kinds:
+                problems.append(
+                    "register %r is fed by undeclared kind %r"
+                    % (name, kind))
+        if field_declared:                                             # R3
+            field_type = m.fields[r.field].type
+            initial_type = "bool" if isinstance(r.initial, bool) else "int"
+            if initial_type != field_type:
+                problems.append(
+                    "register %r has initial %r, which is %s, but field "
+                    "%r is declared %s"
+                    % (name, r.initial, initial_type, r.field, field_type))
+        if name in m.fields:                                           # R4
+            problems.append(
+                "register %r shares its name with a declared field"
+                % (name,))
 
     # The reachability and cap checks both need a declared `initial` to
     # mean anything: with an undeclared initial state, forward-flooding

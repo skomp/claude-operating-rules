@@ -2,12 +2,13 @@ import re
 import yaml
 from .errors import DeclarationError
 from .machine import (FIELDS, REQUIRED, Machine, State, Transition, Field,
-                       FIELD_TYPES, NAME, _MAX_PREFIX_LENGTH)
+                       FIELD_TYPES, NAME, _MAX_PREFIX_LENGTH, Register, FOLDS)
 
 _FENCE = re.compile(r"^```machine[ \t]*\n(.*?)^```[ \t]*$", re.MULTILINE | re.DOTALL)
 
 _STATE_KEYS = {"name", "holder", "terminal", "accepting"}
 _TRANSITION_KEYS = {"from", "on", "by", "to", "signal", "effects"}
+_REGISTER_KEYS = {"fold", "field", "on", "initial"}
 
 
 class MachineSafeLoader(yaml.SafeLoader):
@@ -97,6 +98,7 @@ def parse(text):
             field="roles")
 
     fields = _fields_section(data)
+    registers = _registers_section(data)
 
     raw_states = data["states"]
     if not isinstance(raw_states, list):
@@ -139,7 +141,7 @@ def parse(text):
         data["machine"], data["version"], data["prefix"],
         dict(roles), set(kinds), cap,
         data["initial"], states, transitions,
-        fields=fields,
+        fields=fields, registers=registers,
     )
 
 def _fields_section(data):
@@ -189,6 +191,85 @@ def _fields_section(data):
                 % (name, type_word, FIELD_TYPES), field="fields")
         fields[name] = Field(name, type_word)
     return fields
+
+def _registers_section(data):
+    """The optional `registers` mapping: register name to its fold
+    declaration. Entirely shape validation here -- whether the register's
+    `field` and `on` actually name declared things is a cross-reference
+    `check_machine` makes (R1, R2), not this function, the same split
+    `_fields_section` documents above.
+
+    Absent or empty means no registers declared, and the result is `{}`,
+    not `None` -- the same reason `_fields_section` gives.
+
+    A mapping, keyed the same way `fields` is and for the same reason: a
+    list of `{name: ...}` objects would be a third entry shape to
+    validate for information a mapping already carries, and could carry a
+    duplicate register name a mapping cannot.
+
+    Each key must match `NAME` (machine.py), the same pattern `fields`
+    uses and the same reasoning -- register names and field names share
+    one namespace (see `NAME`'s comment in machine.py) and both must stay
+    clear of the dotted `envelope.*` one.
+
+    Each value must be a mapping with exactly the four keys `fold`,
+    `field`, `on`, `initial` -- all required, none else tolerated:
+
+    - `fold` a string in `FOLDS`.
+    - `field` a string -- not checked against `fields` here; that is R1.
+    - `on` a non-empty list of strings -- not checked against `kinds`
+      here; that is R2. Non-empty because an `on` that never fires would
+      be a register that never updates, which is a constant declared
+      through the back door; see SCHEMA.md's `registers` section for why
+      that is a stated gap rather than a feature to admit this way.
+    - `initial` an `int` (Python's `bool` is a subclass of `int`, so this
+      test alone accepts both) -- whether it agrees with the field's
+      declared type is R3, a cross-reference this function cannot make.
+    """
+    if "registers" not in data:
+        return {}
+    raw = data["registers"]
+    if not isinstance(raw, dict):
+        raise DeclarationError(
+            "registers must be a mapping of register name to its fold "
+            "declaration, not %r" % (raw,), field="registers")
+    registers = {}
+    for name, spec in raw.items():
+        if not isinstance(name, str) or not NAME.match(name):
+            raise DeclarationError(
+                "register name %r must match %s" % (name, NAME.pattern),
+                field="registers")
+        _require_mapping(spec, "registers")
+        _reject_unknown(spec, _REGISTER_KEYS, "registers")
+
+        fold = _require_string(
+            _require_present(spec, "fold", "registers"), "fold",
+            "a register's ")
+        if fold not in FOLDS:
+            raise DeclarationError(
+                "register %r has fold %r, which is not one of %s"
+                % (name, fold, FOLDS), field="registers")
+
+        field = _require_string(
+            _require_present(spec, "field", "registers"), "field",
+            "a register's ")
+
+        on = _require_present(spec, "on", "registers")
+        if not isinstance(on, list) or not on:
+            raise DeclarationError(
+                "register %r must have a non-empty list of kinds under "
+                "'on', not %r" % (name, on), field="registers")
+        for kind in on:
+            _require_string(kind, "on", "each entry of a register's ")
+
+        initial = _require_present(spec, "initial", "registers")
+        if not isinstance(initial, int):
+            raise DeclarationError(
+                "register %r initial must be an int or a bool, not %r"
+                % (name, initial), field="registers")
+
+        registers[name] = Register(name, fold, field, list(on), initial)
+    return registers
 
 def _reject_unknown(raw, allowed, where):
     for key in raw:
