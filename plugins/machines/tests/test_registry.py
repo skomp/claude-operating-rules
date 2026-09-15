@@ -119,6 +119,20 @@ class TestCheckAll(unittest.TestCase):
         self.assertNotIn("beta", report.problems)
         self.assertEqual(report.collisions, [])
 
+    # --- gap found while preparing A.1's task 2: prefix validation moved
+    # into check_machine (machine.py's prefix_problem), so a bad prefix
+    # must be reported exactly once, not once by check_machine and again
+    # by check_all re-deriving the same verdict.
+
+    def test_a_bad_prefix_is_reported_once_not_twice(self):
+        bad = named("alpha", "alpha:v1 ")
+        bad.prefix = "a*"
+        report = check_all([bad, named("beta", "beta:v1 ")])
+        self.assertEqual(
+            len([p for p in report.problems["alpha"] if "prefix" in p]), 1,
+            report.problems["alpha"])
+        self.assertEqual(report.collisions, [])   # excluded from collision checking
+
 
 class TestCli(unittest.TestCase):
     def test_no_paths_exits_2_and_says_so(self):

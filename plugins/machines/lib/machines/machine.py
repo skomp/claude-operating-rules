@@ -1,5 +1,7 @@
 from collections import deque
 
+from .pattern import PatternError, compile_pattern
+
 # Every top-level field the parser accepts, and the subset of them a
 # declaration must actually carry. `cap` is the one that is accepted and
 # not required: a protocol that has no reason to terminate has no bound to
@@ -67,6 +69,55 @@ class Machine(object):
         self.transitions = transitions
 
 
+def prefix_problem(prefix):
+    """Check a prefix pattern for whether it will compile at all.
+
+    Returns None when `prefix` compiles; otherwise a human-readable problem
+    string naming the field, `"prefix pattern %r: ..."`. This is a
+    property of one machine's own declaration, not of a set of them, and
+    used to be checked only in `registry.py`'s `check_all` -- which meant a
+    caller that used `check_machine` directly (the documented answer to
+    "is this machine well-formed") got no prefix validation at all. It is
+    called from `check_machine` below for exactly that reason, and from
+    `check_all` to decide whether a machine is fit to compare against
+    others for a collision -- a pattern that will not compile cannot be
+    intersected with anything.
+
+    Catches `PatternError` -- from an unparseable prefix, or one that is
+    nullable (matches the empty string, and would therefore claim every
+    message; see pattern.py's `compile_pattern`) -- and nothing else,
+    except one backstop.
+
+    A prefix nested deep enough in `(...)` groups is named by `PatternError`
+    too -- pattern.py's parser tracks nesting depth and rejects past 100
+    levels, well short of where it would recurse into a raw
+    `RecursionError`. That guard is the ordinary case; `RecursionError`
+    itself is also caught here, alongside `PatternError`, as a backstop --
+    converted to the same kind of named problem -- for whatever AST shape
+    (if any) reaches a deep stack some other way, in either the parser or
+    the compiler. See pattern.py's `_MAX_GROUP_DEPTH` for the measurement
+    and reasoning; the handler below stays trivial on purpose (no
+    formatting that calls back into pattern code, no further recursion),
+    since `RecursionError` fires with the stack nearly exhausted. This
+    backstop is what keeps SCHEMA.md's promise that nothing a publisher
+    writes reaches them as a Python traceback true of a bad prefix
+    specifically, and it must move with the compile call rather than stay
+    behind in `registry.py` -- a raw 399-character nested prefix reached an
+    uncaught traceback through the shipped CLI before this guard existed.
+    """
+    try:
+        compile_pattern(prefix)
+    except PatternError as exc:
+        # Name the field. Every other `check_machine` message says which
+        # field it is about; without the prefix here, a publisher reads
+        # `unclosed group starting at position 0` and has to guess which
+        # of nine fields is a pattern at all.
+        return "prefix pattern %r: %s" % (prefix, exc)
+    except RecursionError:
+        return "prefix pattern %r: too deeply nested to analyse" % (prefix,)
+    return None
+
+
 def check_machine(m):
     """Check a machine for well-formedness.
 
@@ -91,6 +142,11 @@ def check_machine(m):
     purpose, with effects that tell the peers, is doing its job.
     """
     problems = []
+
+    bad_prefix = prefix_problem(m.prefix)
+    if bad_prefix is not None:
+        problems.append(bad_prefix)
+
     names = set(m.states)
 
     initial_declared = m.initial in names

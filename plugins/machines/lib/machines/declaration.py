@@ -210,8 +210,8 @@ def _require_present(raw, key, where):
 # bound on nesting depth. Nesting depth has its own guard now
 # (`_MAX_GROUP_DEPTH` in pattern.py, checked in `_parse_group`), and
 # whatever either guard misses is caught as a last resort where
-# `compile_pattern` is called (see registry.py's `RecursionError` handler)
-# rather than propagating as a traceback.
+# `compile_pattern` is called (see machine.py's `prefix_problem`, and its
+# `RecursionError` handler) rather than propagating as a traceback.
 _MAX_PREFIX_LENGTH = 400
 
 

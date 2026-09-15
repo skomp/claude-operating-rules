@@ -104,6 +104,15 @@ class TestCheckMachine(unittest.TestCase):
         self.assertEqual(len(problems), 1, problems)
         self.assertTrue(any("nowhere" in p for p in problems))
 
+    def test_a_prefix_that_will_not_compile_is_reported_by_check_machine(self):
+        m = _linear_machine(cap=2)
+        m.prefix = "a*"          # nullable: claims every message
+        problems = check_machine(m)
+        self.assertTrue(any("prefix" in p for p in problems), problems)
+
+    def test_a_compiling_prefix_adds_no_problem(self):
+        self.assertEqual(check_machine(_linear_machine(cap=2)), [])
+
 
 class TestChecksNoTaskOwned(unittest.TestCase):
     """Four properties the schema documents, the design says are checked at
