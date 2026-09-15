@@ -174,8 +174,8 @@ declares no header fields, and `check_machine` has nothing to say about it eithe
 
 A field is a named, typed position in a message header: a value a peer's message carries
 that a later cycle's guard compares against, and that a register (a later cycle) can fold
-over a trace of. Task 3 only declares the shape; nothing here evaluates a guard, folds a
-trace, or reads a channel — that is cycle B's engine, not this parser.
+over a trace of. This document only declares the shape; nothing here evaluates a guard,
+folds a trace, or reads a channel — that is cycle B's engine, not this parser.
 
 **There are exactly two types: `int` and `bool`.** Closed on purpose, so a publisher who
 writes `ballot: integer` or `ballot: number` is told the word is wrong by name, rather than
