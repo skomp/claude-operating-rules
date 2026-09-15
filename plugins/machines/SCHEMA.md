@@ -405,27 +405,81 @@ not a law of protocols, and requiring a bound of an author who has none forces t
 a number nobody believes. **A declared bound nobody believes is the failure this framework
 exists to answer, not one it should cause.**
 
-**When a cap is written, it is compared to the machine, not just validated on its own.**
-`check_machine` measures the shortest run from `initial` to an **accepting** state — see the
-next section — and counts only that run's `signal: true` transitions, a `signal: false`
-transition costing nothing because it emits no message a peer ever sees. A cap smaller than
-that count is reported: the machine is declared both to have a budget and to be unable to
-reach a point where nothing is owed inside it. A cap that is merely generous is not reported
-— only one no run can satisfy. Because a local move is free, the "shortest run" the check
-optimizes for is the one with the fewest *signalling* transitions, not the fewest
-transitions of any kind — a run that takes a long detour through local moves and fires only
-one signal is cheaper, for this purpose, than a two-hop run that signals twice.
+**When a cap is written, it is compared to the machine, not just validated on its own,** and
+it is compared at *every* state something is owed, not only at `initial`. A check that
+measured only from `initial` would say nothing whenever `initial` happens to be accepting —
+`session-relay`'s `unopened` is exactly that state, so a check with that shape never
+exercises this framework's own only real declaration. `check_machine` instead treats every
+**subject** — every state reachable from `initial` that is neither accepting nor terminal,
+i.e. every state where something is owed and the run can still move — as a question worth
+asking on its own. An accepting state is never asked: its own distance to the goal set below
+is itself, zero, so no cap could ever be too small for it. A terminal non-accepting state (an
+abort) is never asked either: it can reach nothing at all, by construction, so it would only
+ever land in the no-accepting-state-reachable case below.
 
-The goal is an accepting state and not a terminal one, and not either-or: the question a cap
-answers is whether the budget suffices to get somewhere *good*, and an abort is not somewhere
+The goal set is the **accepting** states, and only the accepting states — not the terminal
+ones, and not `accepting | terminal`, which is the goal set the can-a-run-stop check
+(the next section) uses. The two checks ask different questions on purpose: can-a-run-stop
+asks whether a run can escape limbo at all, and an abort escapes it, so terminal states count
+there. This check asks whether the declared budget buys somewhere *good* — a state where
+nothing is owed on purpose, not a state the run gave up in — and an abort is not somewhere
 good. A cap that only reaches the error state is a cap that cannot be satisfied.
 
-**One consequence, stated rather than left to be discovered.** When `initial` is itself
-accepting — as `session-relay`'s `unopened` is — the shortest run to an accepting state is
-zero transitions long, and no positive cap can be too small. That is the correct answer: a
-run that may legitimately stop before saying anything has emitted nothing, and nothing fits
-in any budget. But it does mean this check has nothing to say about a machine of that shape,
-and a generous-looking cap on one has not been validated against anything.
+For each subject, `check_machine` counts only `signal: true` transitions on a route to an
+accepting state, a `signal: false` transition costing nothing because it emits no message a
+peer ever sees — the cheapest route to a goal is the one with the fewest *signalling*
+transitions, not the fewest transitions of any kind, so a long detour through local moves
+that fires one signal is cheaper, for this purpose, than a two-hop route that signals twice.
+A subject whose cheapest route costs more than the cap is reported. A subject from which no
+accepting state is reachable at all is reported by neither this check nor a second one
+piled on top of it — that is already the can-a-run-stop check's finding, or the
+no-accepting-state one, and a cap message would be a second symptom of the same cause.
+
+**The cost of a route depends on the cap's scope**, `per` (see above). Under `channel`, every
+role's signalling transitions draw from the one shared budget, so the cost is just the count
+along the route, computed for every subject at once by a single backward search from the
+goal set. Under `role`, the cost that matters is the *worst single role* on the route — the
+maximum, not the sum, over each role's own signalling transitions — because each role is
+capped separately. A subject whose channel-scope route already fits under the limit is
+satisfiable under `role` scope for free (spreading a fixed number of transitions across roles
+can only lower the per-role maximum, never raise it), so most subjects are settled without
+any further search. Whatever is left needs an actual search over which role fires how many
+times along which route, and that search's cost grows with the number of declared roles —
+guarded by a size limit before it ever runs; see the next paragraph for what that means for
+an author.
+
+**A per-role cap on a subject phase 1 cannot clear is bounded, and past the bound this check
+reports nothing about that subject rather than refusing to analyse it or hanging.** The
+search space is `states × (limit + 1) ^ roles`; past roughly a million such states,
+`check_machine` gives up silently on the subjects still open, the same direction §7 already
+takes for the guard abstraction generally and §9 already takes for every finding an author
+cannot suppress — a fatal "could not analyse" on a valid machine would be worse than a
+missing finding. In practice this budget is generous for every declaration this cycle ships:
+`session-relay` (5 states, `limit: 10`, 2 roles) uses 605 of it, and `paxos-acceptor`
+(5 states, `limit: 6`, 2 roles) uses 245 — about three orders of magnitude of headroom for
+either. The more useful number for an author is the other direction: the largest `limit` a
+given shape can carry before this guard bites at all —
+
+| Shape | Fully analysed up to `limit` |
+|---|---|
+| 5 states, 2 roles | 446 |
+| 5 states, 3 roles | 57 |
+| 5 states, 4 roles | 20 |
+| 20 states, 2 roles | 222 |
+| 20 states, 4 roles | 13 |
+
+Read the 4-role rows, not only the flattering 2-role ones: a four-role, 5-state protocol with
+`limit: 30` already trips this guard. That is not comfortable, and it is worth an author's
+attention before it ships, not after. The mitigating fact is real, but it is a second fact,
+not the first one: this search is only ever reached by a subject the free, per-channel
+clearance above could not already clear — one whose cheapest route to an accepting state
+needs *more than `limit`* signalling transitions in total, every role counted together. A
+4-role, 5-state machine with `limit: 30` whose cheapest route also needs more than thirty
+signalling transitions from some state is already a strange declaration. Both facts matter;
+a cap declaration that leans on only the second is leaning on an unmeasured rationale, which
+is exactly the shape of mistake this codebase has already shipped once, in `pattern.py`'s
+`_MAX_NFA_STATES`: a stated rationale wrong by a factor of ten, because the real limit was
+set by something else first, and only a full review found it.
 
 ## `initial`
 

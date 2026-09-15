@@ -279,6 +279,57 @@ class Machine(object):
 _MAX_PREFIX_LENGTH = 400
 
 
+# Phase 2 of the per-role cap check (see the cap block in `check_machine`,
+# below) searches `(state, per-role counter vector)`, one counter per
+# declared role, each ranging over `0..limit`. Its state space is
+# `len(m.states) * (limit + 1) ** len(m.roles)`, and that grows fast in
+# the role count -- this guards it before the search ever runs, the same
+# way `_MAX_PREFIX_LENGTH` (above) and pattern.py's `_MAX_NFA_STATES`
+# guard their own searches before running them.
+#
+# The precedent that makes the number below non-negotiable without a
+# measurement beside it: pattern.py's `_MAX_NFA_STATES` shipped with the
+# rationale "this allows a five-thousand-character literal", which was
+# wrong by a factor of ten -- recursion bound the real limit first, at 498
+# characters. The value was fine; the unmeasured claim beside it was the
+# defect. So, measured here (Python 3.11.9), against the two declarations
+# this cycle ships (`m.states`, `limit`, and `m.roles` read straight off
+# each): session-relay is 5 states, `limit: 10`, 2 roles --
+# `5 * (10 + 1) ** 2 = 605`; paxos-acceptor is 5 states, `limit: 6`,
+# 2 roles -- `5 * (6 + 1) ** 2 = 245`. Against a budget of 1,000,000 that
+# is 1,653x headroom for session-relay and 4,082x for paxos-acceptor --
+# about three orders of magnitude, not six, which is the number an
+# unmeasured "the budget is a million and the real machines are in the
+# hundreds" reflex would have written.
+#
+# The more useful number for a publisher is the other direction: the
+# largest `limit` a given shape can carry before this guard bites at all
+# -- the largest integer for which `states * (limit + 1) ** roles <=
+# 1_000_000` still holds (also measured, not transcribed):
+#
+#   states   roles   largest limit fully analysed
+#        5       2   446
+#        5       3    57
+#        5       4    20
+#       20       2   222
+#       20       4    13
+#
+# Read the 4-role rows, not only the flattering 2-role ones: a four-role,
+# 5-state protocol with `limit: 30` already trips this guard. That is not
+# comfortable, and noticing it here -- rather than after it ships -- is
+# the entire lesson `_MAX_NFA_STATES` paid for. The mitigating fact is
+# real but it is a second fact, not the first one: phase 2 is only ever
+# reached by a subject phase 1 (the free, per-channel clearance in
+# `check_machine`) could not already clear -- one whose shortest run to an
+# accepting state needs *more than `limit`* signalling transitions in
+# total, counting every role together. A 4-role, 5-state machine with
+# `limit: 30` whose shortest run also needs more than thirty signalling
+# transitions from some state is already a strange declaration. Both facts
+# belong in this comment and in SCHEMA.md; citing only the second is how
+# the next unmeasured rationale gets written.
+_MAX_CAP_SEARCH = 1_000_000
+
+
 def prefix_problem(prefix):
     """Check a prefix pattern for whether a `Machine` can actually use it:
     whether it is short enough, and whether it will compile.
@@ -741,75 +792,145 @@ def check_machine(m):
         # would put a number in front of the publisher that they never
         # wrote.
         #
-        # When present, `cap` bounds the outbound messages one run may
-        # emit -- the transitions it fires with `signal: true`, not every
-        # transition it fires. A `signal: false` move is purely local: it
-        # is not an outbound message and does not cost against the cap
-        # (see SCHEMA.md's `cap` and `signal` sections). If even the
-        # cheapest run from `initial` to an *accepting* state fires more
-        # signalling transitions than the cap allows, no run can both stay
-        # under the cap and reach a point where nothing is owed.
+        # `cap` bounds the outbound messages one run may emit -- the
+        # transitions it fires with `signal: true`, not every transition
+        # it fires. A `signal: false` move is purely local: it is not an
+        # outbound message and does not cost against the cap (see
+        # SCHEMA.md's `cap` and `signal` sections).
         #
-        # The goal set is the accepting states, not the terminal ones and
-        # not `terminals | accepting`: the question a cap answers is
-        # whether the budget suffices to get somewhere *good*, and an abort
-        # is not somewhere good. A cap that only reaches the error state is
-        # a cap that cannot be satisfied.
+        # Subjects: every state reachable from `initial` that is neither
+        # accepting nor terminal -- every state where something is owed
+        # and the run can still move. Measuring only from `initial` (the
+        # check this replaces) is why a cap on `session-relay` was never
+        # exercised: `unopened` is initial and accepting, so that check's
+        # one measurement was always zero. Neither an accepting state nor
+        # a terminal non-accepting one is ever asked the question here:
+        # an accepting state's own distance to the goal set below is
+        # itself, i.e. zero, so no cap could ever be too small for it, and
+        # a terminal non-accepting state (an abort) can reach nothing at
+        # all, by construction, so it would only ever hit the
+        # no-accepting-state-reachable case a few paragraphs down. A
+        # subject this check can ever name is exactly a state the answer
+        # is genuinely open for.
         #
-        # Consequence worth stating: when `initial` is itself accepting --
-        # as `session-relay`'s `unopened` is -- the shortest distance is
-        # zero and no positive cap can be too small. That is the correct
-        # answer, not a hole: a run that may legitimately stop before
-        # saying anything has emitted nothing, and nothing fits in any
-        # budget. It does mean the check is vacuous for that shape of
-        # machine.
+        # Goal set: the accepting states, and only the accepting states --
+        # deliberately narrower than `terminals | accepting`, the goal set
+        # the can-a-run-stop check above uses. The two checks ask
+        # different questions, and §7 is where that split is drawn: the
+        # check above asks whether a run can escape limbo at all, and an
+        # abort escapes it, so `terminals | accepting` is the right goal
+        # set there. This check asks whether the declared budget buys
+        # somewhere *good* -- a state where nothing is owed on purpose,
+        # not a state the run gave up in -- and an abort is not somewhere
+        # good. A cap that only reaches the error state is a cap that
+        # cannot be satisfied, and saying so is this check's job, not a
+        # case to paper over by widening the goal set to match §9's
+        # literal (and, for this check, incorrect) wording.
         #
-        # This makes it a shortest *weighted* path problem, not a plain
-        # BFS: a `signal: true` edge costs 1, a `signal: false` edge costs
-        # 0, and a run may freely spend any number of free local moves.
-        # 0-1 BFS (a deque, pushing a 0-weight relaxation to the front and
-        # a 1-weight relaxation to the back) finds that shortest weighted
-        # distance in linear time, same as plain BFS would for the
-        # unweighted graph it replaces.
+        # Cost of a route, by `m.cap_scope` (one of `CAP_SCOPES`):
         #
-        # Nothing is reported when no accepting state is reachable at all:
-        # that is already the reachability check's finding (or the
-        # no-accepting-state one), and a cap message on top of it would be
-        # a second symptom of one cause.
+        #   channel -- the number of `signal: true` transitions on the
+        #   route, however many roles fire them. One backward 0-1 BFS
+        #   (`_signal_distances`, below) from the goal set, over every
+        #   transition reversed, gives every state's distance to the
+        #   nearest accepting state at once, in linear time.
+        #
+        #   role -- the *maximum over roles* of that role's own
+        #   `signal: true` transitions on the route, computed in two
+        #   phases because the naive per-role search is exponential in
+        #   the role count:
+        #
+        #     1. Free. `max_r count_r <= total`, so any subject whose
+        #        channel-scope distance already fits under the cap is
+        #        satisfiable under `role` scope too -- the same backward
+        #        0-1 BFS above clears it, no further search needed. In
+        #        practice this clears every subject of every declaration
+        #        in this cycle.
+        #     2. For whatever phase 1 could not clear: search
+        #        `(state, per-role counter vector)` forward from the
+        #        subject (`_role_cap_satisfiable`, below), clamping every
+        #        counter at `limit` and pruning any move that would push
+        #        one over it. The subject is satisfiable under `role`
+        #        scope iff that search reaches an accepting state. The
+        #        state space is `len(m.states) * (limit + 1) **
+        #        len(m.roles)` -- see `_MAX_CAP_SEARCH`, above
+        #        `check_machine`, for the guard on it and the numbers
+        #        measured beside that guard. Past the guard, nothing is
+        #        reported for the remaining subjects: silence is the safe
+        #        direction, the same as it is for the guard abstraction
+        #        generally (§7) and for every unsuppressible finding this
+        #        design already refuses (§9) -- a fatal "could not
+        #        analyse" on a valid machine would be worse than a missing
+        #        finding.
+        #
+        # Nothing is reported for a subject from which no accepting state
+        # is reachable at all: that is already the reachability check's
+        # finding (or the no-accepting-state one), and a cap message on
+        # top of it would be a second symptom of one cause.
         if m.cap is not None:
-            signal_forward = {}
+            reversed_signal = {}
             for t in m.transitions:
-                signal_forward.setdefault(t.frm, []).append(
-                    (t.to, 1 if t.signal else 0))
+                reversed_signal.setdefault(t.to, []).append(
+                    (t.frm, 1 if t.signal else 0))
+            channel_distance = _signal_distances(accepting, reversed_signal)
 
-            shortest = _shortest_signal_distance(
-                m.initial, accepting, signal_forward)
-            if shortest is not None and shortest > m.cap:
-                problems.append(
-                    "cap %d is too small: the shortest run from %r to an "
-                    "accepting state fires %d signalling transitions"
-                    % (m.cap, m.initial, shortest))
+            if m.cap_scope == "role":
+                forward_by_role = {}
+                for t in m.transitions:
+                    forward_by_role.setdefault(t.frm, []).append(
+                        (t.to, t.by, 1 if t.signal else 0))
+                role_index = {r: i for i, r in enumerate(sorted(m.roles))}
+                search_affordable = (
+                    len(m.states) * (m.cap + 1) ** len(m.roles)
+                    <= _MAX_CAP_SEARCH)
+
+            for name in sorted(reachable - accepting - terminals):
+                d = channel_distance.get(name)
+                if d is None:
+                    continue
+                if m.cap_scope != "role":
+                    if d > m.cap:
+                        problems.append(
+                            "cap %d is too small: from state %r, the "
+                            "shortest run to an accepting state fires %d "
+                            "signalling transitions"
+                            % (m.cap, name, d))
+                    continue
+                if d <= m.cap:
+                    continue  # phase 1: cleared for free
+                if not search_affordable:
+                    continue  # _MAX_CAP_SEARCH's guard: report nothing
+                if not _role_cap_satisfiable(
+                        name, accepting, forward_by_role, role_index, m.cap):
+                    problems.append(
+                        "cap %d is too small: from state %r, no run "
+                        "reaches an accepting state without some role "
+                        "sending more than %d signalling transitions"
+                        % (m.cap, name, m.cap))
 
     return problems
 
 
-def _shortest_signal_distance(start, goals, graph):
-    """Shortest weighted distance from `start` to the nearest member of
-    `goals`, where `graph[node]` is a list of `(target, weight)` edges and
-    `weight` is 1 for a `signal: true` transition, 0 for `signal: false`.
-    Returns None when no member of `goals` is reachable at all.
+def _signal_distances(goals, graph):
+    """0-1 BFS distances from every member of `goals` to every node that
+    can reach one, over `graph`, where `graph[node]` is a list of
+    `(neighbour, weight)` edges and `weight` is 1 for a `signal: true`
+    transition, 0 for `signal: false`. Returns `{node: distance}`; a node
+    absent from the result cannot reach any member of `goals` at all.
 
-    `goals` used to be the terminal states, which are sinks by
-    construction; it is now the accepting states, which need not be --
-    an accepting state may have any number of transitions out of it, and
-    `start` may itself be a goal. Neither disturbs anything here. The goal
-    set is read in exactly one place (the early return below), the search
-    stops at the first goal it pops rather than expanding through it, and
-    `start in goals` correctly answers 0. A goal's out-degree is never
-    consulted, so re-targeting is a change of argument, not of algorithm.
+    Called with `graph` already reversed (built from `t.to` to
+    `(t.frm, weight)`, not the other way around) and `goals` as the
+    accepting states: `dist[s]` after this call is then the cost of the
+    cheapest *forward* run from `s` to some accepting state -- the
+    quantity the cap check bounds -- for every state at once, rather than
+    once per subject. Every member of `goals` seeds the search at distance
+    0, the same "zero hops away", not "shortest cycle back to it" reading
+    a single source would get; multi-source 0-1 BFS is exactly
+    single-source with more than one node seeded before the loop starts,
+    the algorithm does not otherwise distinguish them.
 
-    This is 0-1 BFS, not plain BFS: a graph with only 0/1 edge weights has
-    a shortest-path structure plain (unweighted) BFS cannot compute
+    0-1 BFS, not plain BFS: a graph with only 0/1 edge weights has a
+    shortest-path structure plain (unweighted) BFS cannot compute
     correctly, because a 0-weight edge can make a "farther" node (by hop
     count) actually cheaper. A deque keeps the frontier ordered by
     distance without a heap: relaxing a node along a weight-0 edge pushes
@@ -818,13 +939,14 @@ def _shortest_signal_distance(start, goals, graph):
     out) -- so the deque is popped in non-decreasing distance order, same
     as plain BFS's FIFO queue is when every edge costs 1.
     """
-    dist = {start: 0}
-    frontier = deque([start])
+    dist = {}
+    frontier = deque()
+    for g in goals:
+        dist[g] = 0
+        frontier.append(g)
     while frontier:
         node = frontier.popleft()
         d = dist[node]
-        if node in goals:
-            return d
         for target, weight in graph.get(node, ()):
             candidate = d + weight
             if candidate < dist.get(target, _INFINITY):
@@ -833,7 +955,53 @@ def _shortest_signal_distance(start, goals, graph):
                     frontier.appendleft(target)
                 else:
                     frontier.append(target)
-    return None
+    return dist
+
+
+def _role_cap_satisfiable(start, goals, forward, role_index, limit):
+    """Phase 2 of the per-role cap search (see the cap block in
+    `check_machine`, above): can some run from `start` reach a member of
+    `goals` without any single role firing more than `limit` `signal:
+    true` transitions along the way?
+
+    `forward[state]` is a list of `(target, by, weight)` edges (`weight`
+    1 for `signal: true`, 0 for `signal: false`), and `role_index` maps a
+    declared role name to its position in a per-role counter vector.
+    Searches `(state, counters)` forward from `start`, incrementing the
+    firing role's own counter on every `signal: true` edge and refusing to
+    take an edge that would push a counter past `limit` -- so no counter
+    in any node this search ever visits exceeds `limit`, and the space it
+    can explore is bounded by `len(states) * (limit + 1) ** len(roles)`,
+    the same product `_MAX_CAP_SEARCH` guards before this function is ever
+    called.
+
+    Plain reachability, not a shortest-path search: phase 1 (the caller's
+    `_signal_distances`) already answered "is there a cheap enough route
+    measured across every role together"; clamping each role's count and
+    asking only "does some route keep every one of them under the limit"
+    turns the question into reachability once the clamp is folded into
+    the state, not a distance to minimise.
+    """
+    zero = (0,) * len(role_index)
+    seen = {(start, zero)}
+    stack = [(start, zero)]
+    while stack:
+        state, counters = stack.pop()
+        for target, by, weight in forward.get(state, ()):
+            if weight:
+                i = role_index[by]
+                if counters[i] >= limit:
+                    continue  # this role would exceed the limit -- pruned
+                next_counters = counters[:i] + (counters[i] + 1,) + counters[i + 1:]
+            else:
+                next_counters = counters
+            if target in goals:
+                return True
+            node = (target, next_counters)
+            if node not in seen:
+                seen.add(node)
+                stack.append(node)
+    return False
 
 
 def _flood(seeds, graph):
