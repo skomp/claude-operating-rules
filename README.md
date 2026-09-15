@@ -1,12 +1,14 @@
 # claude-plugins
 
-Five Claude Code plugins, of three kinds. Three hold rules that were learned the
+Six Claude Code plugins, of four kinds. Three hold rules that were learned the
 expensive way — each one traceable to a specific failure, with the measurement that
 exposed it kept intact. `session-relay` is a design, specified and built in one session
 on 2026-09-13, with no incident behind it. `tone-roulette` is neither: a demonstration
-of what a plugin can do beyond skills, and a joke. Each row in the table below says
-which kind it is, because the three are not interchangeable and the difference is the
-point.
+of what a plugin can do beyond skills, and a joke. `machines` is not a rule at all: it
+is a schema and a checker — a declaration language for a communication protocol, and the
+tool that checks a declaration for well-formedness and for collisions against its peers.
+Each row in the table below says which kind it is, because the four are not
+interchangeable and the difference is the point.
 
 Nothing in the first three is advice in the abstract. Every rule there exists because
 something broke: a security check that passed because its needle was empty, an agent that
@@ -39,6 +41,7 @@ never drags in another:
 /plugin install ticket-craft
 /plugin install session-relay
 /plugin install tone-roulette
+/plugin install machines
 ```
 
 Or run `/plugin` and pick from the menu.
@@ -49,7 +52,7 @@ before you trust that it passed, and finish a correction everywhere the claim ap
 
 The table below says what each of the others is for, and who should skip it.
 
-## The five plugins
+## The six plugins
 
 | Plugin | Install it if | README |
 |---|---|---|
@@ -58,6 +61,7 @@ The table below says what each of the others is for, and who should skip it.
 | **ticket-craft** | You want ASD-STE100 Simplified Technical English enforced on every ticket. Deliberately packaged alone, so wanting the verification rules never drags this in | [plugins/ticket-craft/README.md](plugins/ticket-craft/README.md) |
 | **session-relay** | Your project spans multiple repositories, each with its own live Claude session, and you track work in GitHub issues. Skip it if you work in one repository alone, or that repository tracks work on a `TODO.md` — both are hard preconditions the protocol refuses to run without | [plugins/session-relay/README.md](plugins/session-relay/README.md) |
 | **tone-roulette** | You want a demonstration of what a plugin can do beyond skills — output styles, a `SessionStart` hook and a `UserPromptSubmit` hook, two shell handlers sharing common code — rather than another rule. It is a joke, not a lesson: it rolls a random conversational tone at session start and holds it for the session. Skip it if you only want the operating rules | [plugins/tone-roulette/README.md](plugins/tone-roulette/README.md) |
+| **machines** | You are declaring a communication protocol as a state machine and want it checked for well-formedness and for prefix collisions against its peers before you trust it. Cycle A ships the schema and the checker only — no engine, no installer, no dispatcher. Skip it if you want something that actually runs a protocol; that is not built yet | [plugins/machines/README.md](plugins/machines/README.md) |
 
 ## tone-roulette: known limitations
 
@@ -121,7 +125,7 @@ as a condition that therefore never fired, and a guard that leaked protocol comm
 into ordinary replies. What it does **not** establish is use on real work — nobody has
 yet had a genuine cross-repository fault triaged this way.
 
-The untested property, for all five plugins, is retrieval: whether each `description`
+The untested property, for the five plugins that ship skills, is retrieval: whether each `description`
 actually triggers at the moment it should. If you find one that does not fire when it
 ought to, that is the most useful issue you could open.
 
