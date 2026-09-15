@@ -3,6 +3,7 @@ import io
 import os
 import tempfile
 import unittest
+from pathlib import Path
 
 from machines.cli import main
 from machines.declaration import parse
@@ -14,6 +15,9 @@ def named(name, prefix, version="v1"):
     text = VALID.replace("machine: session-relay", "machine: " + name)
     text = text.replace('prefix: "session-relay:v1 "', 'prefix: "%s"' % prefix)
     return parse(text.replace("version: v1", "version: " + version))
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class TestCheckAll(unittest.TestCase):
@@ -132,7 +136,7 @@ class TestCli(unittest.TestCase):
     def test_a_valid_fixture_exits_0_and_reports_the_count(self):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            code = main(["tests/fixtures/valid-session-relay.md"])
+            code = main([str(FIXTURES / "valid-session-relay.md")])
         self.assertEqual(code, 0)
         self.assertIn("Examined 1 machine", out.getvalue())
 
@@ -158,7 +162,7 @@ class TestCli(unittest.TestCase):
         # found no collisions.
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            code = main(["tests/fixtures/valid-session-relay.md"])
+            code = main([str(FIXTURES / "valid-session-relay.md")])
         self.assertEqual(code, 0)
         self.assertIn("Examined 1 machine", out.getvalue())
         self.assertNotIn("No collisions found", out.getvalue())
