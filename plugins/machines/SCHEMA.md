@@ -6,8 +6,7 @@ It is a closed language — no expressions, no scripts, no callbacks — so ever
 one of the eleven the parser accepts. **Any other top-level field is rejected by name**, not
 silently ignored: a publisher who writes `caps: 10` is told about `caps`, not handed a machine
 with a default cap they never asked for. One of the eleven, `registers`, is accepted and
-parsed into nothing yet — Task 4 of this cycle gives it meaning, and this document does not
-cover it until then.
+parsed into nothing yet, and this document does not cover it.
 
 Every field in this document is required unless its section says otherwise. A required
 field that is missing is rejected by name, the same as an unknown one. **`cap`, `fields`,

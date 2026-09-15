@@ -21,8 +21,7 @@ fields: `machine`, `version`, `prefix`, `roles`, `kinds`, `fields`, `registers`,
 `initial`, `states`, `transitions`. All of them are required except `cap`, `fields`, and
 `registers`. Any other top-level field is rejected by name, not silently ignored.
 `SCHEMA.md` documents every field and why it exists, including the two hazards worth
-knowing before you write a declaration by hand. (`registers` is accepted and parsed into
-nothing yet — a later cycle gives it meaning.)
+knowing before you write a declaration by hand.
 
 **A protocol does not have to terminate, and does not have to declare a cap.** A state is
 *accepting* when nothing further is required — it is fine for the conversation to stop

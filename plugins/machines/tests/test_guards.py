@@ -87,12 +87,25 @@ class TestFields(unittest.TestCase):
         m = parse(VALID)
         self.assertEqual(m.fields, {})
 
+    def test_an_explicit_empty_fields_mapping_is_also_empty(self):
+        # "absent or empty" -- VALID (no `fields` key at all) covers absent;
+        # this covers a publisher who writes the key with nothing under it.
+        m = parse(splice_guarded("fields:\n  ballot: int", "fields: {}"))
+        self.assertEqual(m.fields, {})
+
     def test_an_unknown_type_is_rejected_by_name(self):
         for bad in ("integer", "number", "string", "float"):
             with self.subTest(bad=bad):
                 with self.assertRaises(DeclarationError) as ctx:
                     parse(splice_guarded("ballot: int", "ballot: " + bad))
                 self.assertEqual(ctx.exception.field, "fields")
+
+    def test_a_non_string_type_word_is_rejected(self):
+        # `fields: {ballot: 3}` -- the brief's own motivating failure: an
+        # integer reaching the guard's type check instead of a type word.
+        with self.assertRaises(DeclarationError) as ctx:
+            parse(splice_guarded("ballot: int", "ballot: 3"))
+        self.assertEqual(ctx.exception.field, "fields")
 
     def test_a_field_name_with_a_dot_is_rejected(self):
         # The dotted namespace is reserved for the envelope (spec section 7):

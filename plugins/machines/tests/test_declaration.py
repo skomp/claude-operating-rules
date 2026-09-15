@@ -150,9 +150,14 @@ class TestParse(unittest.TestCase):
         # that on purpose, rather than let the suite stay green by
         # accident if a future change made either required.
         self.assertIn("fields", FIELDS)
-        self.assertNotIn("fields", REQUIRED)
         self.assertIn("registers", FIELDS)
-        self.assertNotIn("registers", REQUIRED)
+        # The full value, not just two memberships: a membership check
+        # alone would not catch some future change accidentally adding a
+        # third optional name to FIELDS without also excluding it here.
+        self.assertEqual(
+            REQUIRED,
+            ("machine", "version", "prefix", "roles", "kinds",
+             "initial", "states", "transitions"))
         m = parse(VALID)
         self.assertEqual(m.fields, {})
 
