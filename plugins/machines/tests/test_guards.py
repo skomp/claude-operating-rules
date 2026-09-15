@@ -394,8 +394,8 @@ class TestDeterminismUnderGuards(unittest.TestCase):
         # atom sets now share `GT`: both hold whenever the field is
         # strictly greater than the register, not merely when they are
         # equal.
-        m = parse(GUARDED.replace("op: le, register: highest_promised",
-                                  "op: ge, register: highest_promised"))
+        m = parse(splice_guarded("op: le, register: highest_promised",
+                                 "op: ge, register: highest_promised"))
         problems = check_machine(m)
         self.assertTrue(any("nondetermin" in p for p in problems), problems)
 
