@@ -370,13 +370,91 @@ class TestGuards(unittest.TestCase):
         problems = check_machine(m)
         self.assertTrue(any("unused" in p for p in problems), problems)
 
-    def test_the_paxos_fixture_is_well_formed_apart_from_its_guarded_branches(self):
-        # The two guarded branches are still reported as nondeterministic here:
-        # Task 6 replaces the determinism check with the rule that makes a
-        # disjoint guarded branch legal, and tightens this assertion to the
-        # unfiltered equality.
+    def test_the_paxos_fixture_is_well_formed(self):
+        self.assertEqual(check_machine(parse(GUARDED)), [])
+
+
+class TestDeterminismUnderGuards(unittest.TestCase):
+    """A guarded branch is the only legitimate way for one (frm, on, by) to
+    lead to more than one `to`, and only when the guards prove the branches
+    can never both fire: every member carries a guard, all guards compare
+    the same `field` to the same `register`, and no two of their `OP_ATOMS`
+    sets intersect. See the determinism comment in `check_machine` for the
+    rule stated in full.
+    """
+
+    def test_two_guarded_branches_with_disjoint_operators_are_accepted(self):
         self.assertEqual(
-            [p for p in check_machine(parse(GUARDED)) if "nondetermin" not in p], [])
+            [p for p in check_machine(parse(GUARDED)) if "nondetermin" in p], [])
+
+    def test_two_guarded_branches_with_overlapping_operators_are_reported(self):
+        # `gt` accepts only `GT`; `ge` accepts `EQ` or `GT`. Retargeting the
+        # `idle`-to-`idle` branch from `le` to `ge` puts it back in the
+        # group next to the `idle`-to-`prepared` branch's `gt`, and their
+        # atom sets now share `GT`: both hold whenever the field is
+        # strictly greater than the register, not merely when they are
+        # equal.
+        m = parse(GUARDED.replace("op: le, register: highest_promised",
+                                  "op: ge, register: highest_promised"))
+        problems = check_machine(m)
+        self.assertTrue(any("nondetermin" in p for p in problems), problems)
+
+    def test_a_branch_where_one_side_is_unguarded_is_reported(self):
+        # Drop the `gt` guard from the `idle`-to-`prepared` branch, leaving
+        # it unconditional. An unconditional transition always fires, so it
+        # overlaps the `le`-guarded `idle`-to-`idle` branch regardless of
+        # what that guard says.
+        text = _splice_once(
+            GUARDED,
+            "to: prepared, signal: true,\n"
+            "      guard: { field: ballot, op: gt, register: highest_promised } }",
+            "to: prepared, signal: true }")
+        problems = check_machine(parse(text))
+        self.assertTrue(any("nondetermin" in p for p in problems), problems)
+
+    def test_two_branches_guarding_different_fields_are_reported(self):
+        # Retarget the `le` guard to a second, newly declared field. Two
+        # guards naming different fields cannot be related without
+        # interpreting the values they compare, so the group is reported
+        # regardless of what either operator is.
+        text = _splice_once(GUARDED, "fields:\n  ballot: int",
+                            "fields:\n  ballot: int\n  blocking: bool")
+        text = _splice_once(
+            text, "field: ballot, op: le, register: highest_promised",
+            "field: blocking, op: le, register: highest_promised")
+        problems = check_machine(parse(text))
+        self.assertTrue(any("nondetermin" in p for p in problems), problems)
+
+    def test_two_branches_guarding_different_registers_are_reported(self):
+        # A second register, folding the same field, gives the `le` guard
+        # somewhere else to point. Two guards naming different registers
+        # are exactly as unrelatable as two naming different fields.
+        text = _splice_once(
+            GUARDED,
+            "highest_promised: { fold: max, field: ballot, on: [prepare], initial: 0 }",
+            "highest_promised: { fold: max, field: ballot, on: [prepare], initial: 0 }\n"
+            "  highest_promised2: { fold: max, field: ballot, on: [prepare], initial: 0 }")
+        text = _splice_once(text, "op: le, register: highest_promised",
+                            "op: le, register: highest_promised2")
+        problems = check_machine(parse(text))
+        self.assertTrue(any("nondetermin" in p for p in problems), problems)
+
+    def test_a_single_guarded_transition_needs_no_complement(self):
+        # Paxos's acceptor: accept a high ballot, do nothing with a low one.
+        # Dropping the `le`-guarded `idle`-to-`idle` branch entirely leaves
+        # the `gt`-guarded `idle`-to-`prepared` branch alone in its group --
+        # a single `to`, so the determinism check never even considers it.
+        # Incompleteness is legal and must never be reported: some
+        # comparison outcome now fires no transition, which is the same
+        # outcome as an illegal message, and the engine's verdict already
+        # reports that.
+        text = _splice_once(
+            GUARDED,
+            "  - { from: idle, on: prepare, by: proposer, to: idle, signal: true,\n"
+            "      guard: { field: ballot, op: le, register: highest_promised } }\n",
+            "")
+        self.assertEqual(
+            [p for p in check_machine(parse(text)) if "nondetermin" in p], [])
 
 
 if __name__ == "__main__":

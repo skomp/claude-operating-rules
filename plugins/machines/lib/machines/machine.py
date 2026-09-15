@@ -408,22 +408,78 @@ def check_machine(m):
         if t.frm in terminals:
             problems.append("terminal state %r has an outgoing transition" % t.frm)
 
-    # Determinism. Two transitions sharing (from, on, by) with different
-    # `to` states leave the machine with a choice no declaration resolves.
-    # The engine is specified as a fold over the message trace, and a fold
-    # is a function: it has exactly one result per (state, message). A
-    # nondeterministic declaration therefore cannot be run at all, and
-    # nothing else here says so -- every other check passes on it.
-    destinations = {}
+    # Determinism, with a guarded branch as the one legitimate exception.
+    # Two transitions sharing (frm, on, by) with different `to` states
+    # leave the machine with a choice no declaration resolves, unless a
+    # guard on every one of them proves the choice is never actually
+    # offered. The engine is specified as a fold over the message trace,
+    # and a fold is a function: it has exactly one result per (state,
+    # message). A nondeterministic declaration therefore cannot be run at
+    # all, and nothing else here says so -- every other check passes on it.
+    #
+    # The rule, in the order it is checked, for each group whose distinct
+    # `to` values number more than one (a group with only one is a
+    # duplicate, not an ambiguity, and is skipped entirely, same as
+    # before):
+    #
+    #   1. Any member with no guard -- an unguarded transition always
+    #      fires, so it overlaps everything else in the group. Reported.
+    #   2. The members' guards do not all compare the same `field` to the
+    #      same `register` -- two different comparisons cannot be related
+    #      to each other without interpreting the values they compare,
+    #      which is precisely what the two-outcome abstraction (`OP_ATOMS`,
+    #      above) exists to avoid needing to do. Reported.
+    #   3. Any two members' `OP_ATOMS` sets intersect -- both guards can
+    #      hold for the same comparison outcome, so the branch they guard
+    #      is still a choice. Reported, naming both operators. Checked
+    #      pairwise across the *whole* group, including two members that
+    #      happen to agree on `to`: they may still disagree on `effects`,
+    #      and the verdict has no way to know which set was required.
+    #   4. Otherwise: the guards partition the comparison's outcomes, so
+    #      exactly one member fires for any value the field and register
+    #      can produce. Not reported.
+    #
+    # What this proves, and what it does not: disjointness, never
+    # completeness. A group of `ge` alone -- an acceptor that accepts a
+    # high ballot and does nothing at all with a low one -- is legal: an
+    # incomplete guard set means some outcome fires no transition, which is
+    # the same outcome as an illegal message, and the engine's verdict
+    # already reports that. Reporting it here too would be an
+    # unsuppressible finding on a valid machine, which is the thing §9
+    # refuses.
+    groups = {}
     for t in m.transitions:
-        destinations.setdefault((t.frm, t.on, t.by), set()).add(t.to)
-    for trigger in sorted(destinations):
-        targets = destinations[trigger]
-        if len(targets) > 1:
+        groups.setdefault((t.frm, t.on, t.by), []).append(t)
+    for trigger in sorted(groups):
+        members = groups[trigger]
+        targets = set(t.to for t in members)
+        if len(targets) <= 1:
+            continue
+        problem = (
+            "transitions from %r on %r by %r are nondeterministic: they "
+            "lead to %s" % (trigger[0], trigger[1], trigger[2],
+                            ", ".join(repr(x) for x in sorted(targets))))
+        if any(t.guard is None for t in members):                      # 1
+            problems.append(problem)
+            continue
+        fields = set(t.guard.field for t in members)
+        registers = set(t.guard.register for t in members)
+        if len(fields) > 1 or len(registers) > 1:                      # 2
+            problems.append(problem)
+            continue
+        overlap = None
+        for i in range(len(members)):
+            for j in range(i + 1, len(members)):
+                op_i, op_j = members[i].guard.op, members[j].guard.op
+                if OP_ATOMS[op_i] & OP_ATOMS[op_j]:                     # 3
+                    overlap = (op_i, op_j)
+                    break
+            if overlap is not None:
+                break
+        if overlap is not None:
             problems.append(
-                "transitions from %r on %r by %r are nondeterministic: they "
-                "lead to %s" % (trigger[0], trigger[1], trigger[2],
-                                ", ".join(repr(x) for x in sorted(targets))))
+                "%s (guards %r and %r overlap)" % (problem, overlap[0], overlap[1]))
+        # else: rule 4 -- the guards partition the outcomes; not reported.
 
     # Holder agreement. A state's `holder` and a transition's `by` both
     # answer "who acts next" -- the channel-layer property the design makes

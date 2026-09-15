@@ -503,7 +503,16 @@ Each entry is a transition, with these fields:
 - **`to`** (string, required) — the state this transition lands in. Checked against
   `states`. Two transitions sharing `from`, `on` and `by` but naming different `to` states
   are reported: the engine is a fold over the message trace, and a fold has exactly one
-  result per step, so a machine with that choice in it cannot be run at all.
+  result per step, so a machine with that choice in it cannot be run at all — **unless every
+  one of them carries a `guard`, all of those guards compare the same `field` to the same
+  `register`, and no two of their operators' atom sets (see the table under `guard`, below)
+  intersect.** A member with no guard, or a guard naming a different `field` or `register`
+  than the rest, cannot be related to the others without interpreting a value the checker
+  never evaluates, so it is reported exactly as an unguarded pair is. This proves the
+  branches are disjoint and nothing more: a group with only one guarded member — an acceptor
+  that accepts a high ballot and does nothing at all with a low one — is legal, because an
+  incomplete guard set fires no transition for the outcomes it omits, which is the same
+  legal outcome as an illegal message, already reported elsewhere.
 - **`signal`** (boolean, optional, default: `false`) — whether firing this transition emits a
   signal to a peer, as opposed to a purely local move. If present, must be an actual boolean;
   see "Scalars mean what you wrote" above — `signal: yes` is rejected, not silently accepted
@@ -522,9 +531,10 @@ Each entry is a transition, with these fields:
   guard: { field: ballot, op: gt, register: highest_promised }
   ```
 
-  A guard narrows *when* a transition fires, but does not — in this cycle — change the
-  determinism check above: two guarded transitions sharing `from`, `on` and `by` are still
-  reported, even where their guards can never both be true for the same arriving message.
+  A guard narrows *when* a transition fires, and the determinism check above reads it: two
+  guarded transitions sharing `from`, `on` and `by` are accepted when their guards compare
+  the same `field` to the same `register` and their operators' atom sets are disjoint — see
+  the `to` bullet, above, for the rule stated in full.
 
   `check_machine` cross-references a guard's `field` and `register` against `fields` and
   `registers`, and checks that the comparison it declares is type-sound:
