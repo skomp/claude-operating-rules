@@ -1,6 +1,7 @@
 import unittest
 from machines.declaration import parse
-from machines.machine import Machine, State, Transition, check_machine
+from machines.machine import (Machine, State, Transition, check_machine,
+                               _MAX_PREFIX_LENGTH)
 from tests.test_declaration import VALID  # the known-good declaration
 
 def mutate(old, new):
@@ -112,6 +113,22 @@ class TestCheckMachine(unittest.TestCase):
 
     def test_a_compiling_prefix_adds_no_problem(self):
         self.assertEqual(check_machine(_linear_machine(cap=2)), [])
+
+    def test_a_prefix_over_the_length_limit_is_reported_by_check_machine(self):
+        # `declaration.parse` rejects this before a Machine ever exists
+        # (see declaration.py's `_require_prefix_length`), so this only
+        # exercises a hand-built Machine -- exactly the case check_machine
+        # is now the sole gate for.
+        m = _linear_machine(cap=2)
+        m.prefix = "a" * (_MAX_PREFIX_LENGTH + 1)
+        problems = check_machine(m)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("prefix", problems[0])
+
+    def test_a_prefix_at_the_length_limit_adds_no_problem(self):
+        m = _linear_machine(cap=2)
+        m.prefix = "a" * _MAX_PREFIX_LENGTH
+        self.assertEqual(check_machine(m), [])
 
 
 class TestChecksNoTaskOwned(unittest.TestCase):

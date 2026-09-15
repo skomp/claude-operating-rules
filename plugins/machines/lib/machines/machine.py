@@ -69,24 +69,91 @@ class Machine(object):
         self.transitions = transitions
 
 
-def prefix_problem(prefix):
-    """Check a prefix pattern for whether it will compile at all.
+# `prefix` is not just a string -- it is source text pattern.py compiles to
+# an NFA. `_parse_cat` (the recursive-descent parser's grammar production
+# for concatenation) is an iterative loop, not per-character recursion, so
+# parsing itself survives a long bare literal; but it builds a left-deep
+# `Cat(Cat(Cat(...), Lit), Lit)` tree, one level per character, and the
+# Thompson NFA compiler's `_compile_cat` walks that tree by recursing into
+# `node.left` -- so a long enough literal exhausts Python's call stack
+# during *compilation*, with no `(`, `|`, or repetition operator anywhere
+# in it, and nothing about the parse stage itself at fault.
+#
+# Measured: a 498-character literal prefix compiles; 499 raises
+# `RecursionError` out of `compile_pattern`, reached via `check_machine`
+# (see `prefix_problem` below) or via `declaration.parse` (see
+# declaration.py's `_require_prefix_length`, which enforces this same
+# limit at parse time, before a `Machine` even exists), past every shape
+# guard above, as an uncaught traceback -- exit 1 from `machines-check`
+# for a crash, not a finding.
+#
+# 400 is the limit for *this* route: two orders of magnitude above
+# `session-relay:v1 ` (17 characters) or any other plausible protocol
+# prefix, comfortably under the 498 where a bare literal's recursion
+# fails, checked both here and in declaration.py's `_require_prefix_length`
+# before the pattern parser ever sees the text, so a publisher -- or, for
+# a hand-built `Machine` that skipped the parser, a caller of
+# `check_machine` -- gets a named field and a stated limit instead of a
+# stack trace for that shape of input.
+#
+# CORRECTION: an earlier version of this comment called 498 "the exact
+# failure this module's shape guards otherwise exist to prevent" -- true
+# only for a bare literal. A prefix built from nested `(...)` groups
+# recurses in the *parser*, not just the compiler, and hits it far
+# shallower: `'(' * 199 + 'a' + ')' * 199` is 399 characters -- under this
+# 400-character guard -- and still raised an uncaught `RecursionError`
+# through the shipped CLI. This length guard bounds the concatenation-
+# chain route (a long flat Cat/Alt tree, whatever it's built from --
+# literals, `|` branches, or short reps) and nothing else; it was never a
+# bound on nesting depth. Nesting depth has its own guard now
+# (`_MAX_GROUP_DEPTH` in pattern.py, checked in `_parse_group`), and
+# whatever either guard misses is caught as a last resort by
+# `prefix_problem`'s `RecursionError` handler, rather than propagating as
+# a traceback.
+#
+# This constant used to live only in declaration.py, and so did the check
+# against it: a `Machine` built by `declaration.parse` could never carry
+# an over-length prefix, because `_require_prefix_length` raises before
+# one is constructed. But `prefix_problem` exists precisely so a
+# hand-built `Machine` -- one that skipped the parser and its shape
+# guards entirely, the same case the module docstring on `check_all`
+# already names for `TypeError` -- gets the same answer `check_machine`
+# gives everyone else. Defined here, once, and imported into
+# declaration.py, so the two enforcement points share one number rather
+# than risking two.
+_MAX_PREFIX_LENGTH = 400
 
-    Returns None when `prefix` compiles; otherwise a human-readable problem
+
+def prefix_problem(prefix):
+    """Check a prefix pattern for whether a `Machine` can actually use it:
+    whether it is short enough, and whether it will compile.
+
+    Returns None when `prefix` is fine; otherwise a human-readable problem
     string naming the field, `"prefix pattern %r: ..."`. This is a
     property of one machine's own declaration, not of a set of them, and
-    used to be checked only in `registry.py`'s `check_all` -- which meant a
-    caller that used `check_machine` directly (the documented answer to
-    "is this machine well-formed") got no prefix validation at all. It is
-    called from `check_machine` below for exactly that reason, and from
-    `check_all` to decide whether a machine is fit to compare against
-    others for a collision -- a pattern that will not compile cannot be
-    intersected with anything.
+    used to be checked only in `registry.py`'s `check_all` (compilation)
+    and `declaration.py`'s `_require_prefix_length` (length, at parse
+    time, before a `Machine` exists) -- which meant a caller that used
+    `check_machine` directly on a hand-built `Machine` (the documented
+    answer to "is this machine well-formed", and exactly what cycle B's
+    engine does) got no prefix validation at all. It is called from
+    `check_machine` below for exactly that reason, and from `check_all` to
+    decide whether a machine is fit to compare against others for a
+    collision -- a pattern that will not compile cannot be intersected
+    with anything.
 
-    Catches `PatternError` -- from an unparseable prefix, or one that is
-    nullable (matches the empty string, and would therefore claim every
-    message; see pattern.py's `compile_pattern`) -- and nothing else,
-    except one backstop.
+    The length check first: over `_MAX_PREFIX_LENGTH` characters is
+    rejected by name before `compile_pattern` is even called, the same as
+    declaration.py's `_require_prefix_length` does at parse time -- see
+    that constant, above, for the measurement and reasoning. A `Machine`
+    built by `declaration.parse` can never reach here with an over-length
+    prefix (that function already raised), so this cannot double-report
+    against a parsed machine; it only ever fires for a hand-built one.
+
+    Then `compile_pattern` itself, which catches `PatternError` -- from an
+    unparseable prefix, or one that is nullable (matches the empty string,
+    and would therefore claim every message; see pattern.py's
+    `compile_pattern`) -- and nothing else, except one backstop.
 
     A prefix nested deep enough in `(...)` groups is named by `PatternError`
     too -- pattern.py's parser tracks nesting depth and rejects past 100
@@ -105,6 +172,10 @@ def prefix_problem(prefix):
     behind in `registry.py` -- a raw 399-character nested prefix reached an
     uncaught traceback through the shipped CLI before this guard existed.
     """
+    if len(prefix) > _MAX_PREFIX_LENGTH:
+        return ("prefix pattern %r: prefix is %d characters long; the "
+                "limit is %d characters"
+                % (prefix, len(prefix), _MAX_PREFIX_LENGTH))
     try:
         compile_pattern(prefix)
     except PatternError as exc:

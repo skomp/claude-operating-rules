@@ -1,7 +1,8 @@
 import re
 import yaml
 from .errors import DeclarationError
-from .machine import FIELDS, REQUIRED, Machine, State, Transition
+from .machine import (FIELDS, REQUIRED, Machine, State, Transition,
+                       _MAX_PREFIX_LENGTH)
 
 _FENCE = re.compile(r"^```machine[ \t]*\n(.*?)^```[ \t]*$", re.MULTILINE | re.DOTALL)
 
@@ -176,45 +177,15 @@ def _require_present(raw, key, where):
             "a %s entry is missing required field %r" % (where, key), field=key)
     return raw[key]
 
-# `prefix` is not just a string -- it is source text pattern.py compiles to
-# an NFA. `_parse_cat` (the recursive-descent parser's grammar production
-# for concatenation) is an iterative loop, not per-character recursion, so
-# parsing itself survives a long bare literal; but it builds a left-deep
-# `Cat(Cat(Cat(...), Lit), Lit)` tree, one level per character, and the
-# Thompson NFA compiler's `_compile_cat` walks that tree by recursing into
-# `node.left` -- so a long enough literal exhausts Python's call stack
-# during *compilation*, with no `(`, `|`, or repetition operator anywhere
-# in it, and nothing about the parse stage itself at fault.
-#
-# Measured: a 498-character literal prefix compiles; 499 raises
-# `RecursionError` out of `compile_pattern`, reached via `check_all` (see
-# registry.py), past every shape guard above, as an uncaught traceback --
-# exit 1 from `machines-check` for a crash, not a finding.
-#
-# 400 is the limit for *this* route: two orders of magnitude above
-# `session-relay:v1 ` (17 characters) or any other plausible protocol
-# prefix, comfortably under the 498 where a bare literal's recursion
-# fails, checked here -- before the pattern parser ever sees the text --
-# so the publisher gets a named field and a stated limit instead of a
-# stack trace for that shape of input.
-#
-# CORRECTION: an earlier version of this comment called 498 "the exact
-# failure this module's shape guards otherwise exist to prevent" -- true
-# only for a bare literal. A prefix built from nested `(...)` groups
-# recurses in the *parser*, not just the compiler, and hits it far
-# shallower: `'(' * 199 + 'a' + ')' * 199` is 399 characters -- under this
-# 400-character guard -- and still raised an uncaught `RecursionError`
-# through the shipped CLI. This length guard bounds the concatenation-
-# chain route (a long flat Cat/Alt tree, whatever it's built from --
-# literals, `|` branches, or short reps) and nothing else; it was never a
-# bound on nesting depth. Nesting depth has its own guard now
-# (`_MAX_GROUP_DEPTH` in pattern.py, checked in `_parse_group`), and
-# whatever either guard misses is caught as a last resort where
-# `compile_pattern` is called (see machine.py's `prefix_problem`, and its
-# `RecursionError` handler) rather than propagating as a traceback.
-_MAX_PREFIX_LENGTH = 400
-
-
+# `_MAX_PREFIX_LENGTH` is defined in machine.py, next to `prefix_problem`
+# (imported above), not here -- see it there for the full measurement and
+# reasoning (a 498-character literal recursion limit in compile_pattern,
+# the 399-character nested-group case, and why the number is shared
+# between this module's parse-time check and `prefix_problem`'s check for
+# a hand-built `Machine` that skipped this parser entirely). It stays
+# enforced here too, at parse time, so a publisher gets a named field and
+# a stated limit before the pattern parser ever sees the text, rather
+# than only after a `Machine` has already been constructed.
 def _require_prefix_length(prefix):
     if len(prefix) > _MAX_PREFIX_LENGTH:
         raise DeclarationError(
