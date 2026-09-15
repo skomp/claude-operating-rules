@@ -5,14 +5,16 @@ and check it before you trust it.
 
 ## What this ships, and what it does not
 
-**Cycle A ships the schema and the checker only.** There is no engine — nothing here runs
-a machine, advances a state, or emits a message. There is no installer — nothing wires a
-declared machine into anything that dispatches real traffic. There is no dispatcher —
-nothing routes an inbound message to the machine that owns it. What exists is a closed
-declaration language, a parser for it, a set of checks that a single machine is
-well-formed, and a checker that runs those checks over every machine handed
-to it and reports whether any two claim the same message. That is the whole of cycle A.
-Anything that talks about a machine actually running is a later cycle.
+**Cycle A shipped the schema and the checker; cycle A.1 built typed fields, registers,
+guard and a scoped, strengthened cap check into that same schema and checker.** There is
+no engine — nothing here runs a machine, advances a state, or emits a message. There is no
+installer — nothing wires a declared machine into anything that dispatches real traffic.
+There is no dispatcher — nothing routes an inbound message to the machine that owns it.
+What exists is a closed declaration language, a parser for it, a set of checks that a
+single machine is well-formed, and a checker that runs those checks over every machine
+handed to it and reports whether any two claim the same message. That is the whole of
+cycle A and cycle A.1 together. Anything that talks about a machine actually running is a
+later cycle.
 
 ## The declaration
 

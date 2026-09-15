@@ -55,9 +55,10 @@ stale.
 
 This machine checks two things: message sequencing — that a `promise` cannot arrive before its
 `prepare`, that an `accept-request` cannot arrive before its `promise`, and so on for every
-state's declared exits — and the acceptor invariant the four guards above encode directly: no
-`prepare` or `accept-request` is ever honoured at a ballot lower than one this acceptor has
-already promised. **It does not check agreement.** Nothing here confirms that a majority of
+state's declared exits — and the acceptor invariant the four guards above encode directly: a
+`prepare` is honoured only above the highest ballot already promised, and an `accept-request` is
+honoured only at exactly that ballot, never above it or below it. **It does not check
+agreement.** Nothing here confirms that a majority of
 acceptors settle on one value, that a proposer waits for a quorum of promises before issuing an
 `accept-request`, or that two proposers cannot each believe they have won. Agreement is a
 property of the whole cluster — every acceptor and every proposer, taken together, over a run

@@ -639,7 +639,7 @@ Each entry is a transition, with these fields:
 - **`from`** (string, required) — the state this transition fires out of. The declared
   attribute is `frm`, not `from`: `from` is a Python keyword, so the YAML field name and the
   attribute name differ on purpose. Checked against `states`.
-- **`on`** (string, required) — the message kind that fires this transition. Checked at
+- **`on`** (string, required) — the message kind that fires this transition. Checked
   against `kinds`. **The field name most exposed to the YAML boolean hazard above** —
   written as a bare mapping key, `on:` is exactly the word PyYAML's default resolver turns
   into the boolean `True`. Narrowing boolean resolution (see above) is what keeps `on:

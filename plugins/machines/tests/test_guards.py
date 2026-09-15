@@ -2,7 +2,8 @@ import unittest
 
 from machines.declaration import parse
 from machines.errors import DeclarationError
-from machines.machine import check_machine
+from machines.machine import (Field, Guard, Machine, State, Transition,
+                               check_machine)
 from tests.test_declaration import VALID  # the known-good declaration
 
 
@@ -457,6 +458,37 @@ class TestDeterminismUnderGuards(unittest.TestCase):
             "")
         self.assertEqual(
             [p for p in check_machine(parse(text)) if "nondetermin" in p], [])
+
+    def test_an_operator_outside_op_atoms_is_reported_not_crashed(self):
+        # Not reachable through `parse` -- `_guard_field` (declaration.py)
+        # validates `op` against `OP_ATOMS` before a `Guard` is ever built.
+        # But a hand-built `Machine` is a first-class caller of
+        # `check_machine` too (cycle B's engine constructs exactly this),
+        # and this determinism check used to index `OP_ATOMS[op]` on the
+        # assumption `parse` had already guaranteed it, crashing with a
+        # raw `KeyError` on a `Guard` carrying an operator `parse` would
+        # never have let through. An operator this check cannot relate to
+        # anything must be reported, not silently treated as disjoint
+        # from every other guard in the group -- the safe direction.
+        m = Machine(
+            "bogus-op-test", "v1", "x",
+            {"role": "party"}, {"step1"}, None,
+            "start",
+            {
+                "start": State("start"),
+                "middleA": State("middleA", terminal=True, accepting=True),
+                "middleB": State("middleB", terminal=True, accepting=True),
+            },
+            [
+                Transition("start", "step1", "role", "middleA", signal=True,
+                           guard=Guard("f", "gt", "g")),
+                Transition("start", "step1", "role", "middleB", signal=True,
+                           guard=Guard("f", "bogus", "g")),
+            ],
+            fields={"f": Field("f", "int")},
+        )
+        problems = check_machine(m)
+        self.assertTrue(any("nondetermin" in p for p in problems), problems)
 
 
 if __name__ == "__main__":

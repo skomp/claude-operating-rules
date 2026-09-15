@@ -119,8 +119,8 @@ class TestCheckAll(unittest.TestCase):
         self.assertNotIn("beta", report.problems)
         self.assertEqual(report.collisions, [])
 
-    # --- gap found while preparing A.1's task 2: prefix validation moved
-    # into check_machine (machine.py's prefix_problem), so a bad prefix
+    # --- gap found by the commit that moved prefix validation into
+    # check_machine (machine.py's prefix_problem), so a bad prefix
     # must be reported exactly once, not once by check_machine and again
     # by check_all re-deriving the same verdict.
 

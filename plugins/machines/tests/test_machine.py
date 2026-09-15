@@ -4,6 +4,7 @@ from machines.declaration import parse
 from machines.machine import (Machine, State, Transition, check_machine,
                                _MAX_PREFIX_LENGTH)
 from tests.test_declaration import VALID  # the known-good declaration
+from tests.test_guards import GUARDED  # the known-good guarded declaration
 
 def mutate(old, new):
     # Assert the splice landed. A `str.replace` whose `old` no longer
@@ -741,9 +742,21 @@ class TestCapSearchBudget(unittest.TestCase):
     def test_a_real_machine_is_far_inside_the_search_budget(self):
         # Pins the headroom claim so that lowering the constant fails
         # loudly rather than silently switching real machines onto the
-        # silent path.
-        self.assertLess(5 * (10 + 1) ** 2, machine_module._MAX_CAP_SEARCH)  # session-relay
-        self.assertLess(5 * (6 + 1) ** 2, machine_module._MAX_CAP_SEARCH)   # paxos-acceptor
+        # silent path. Derived from the parsed fixtures, not transcribed
+        # as literals: session-relay and paxos-acceptor are free to grow
+        # a state without this test, `_MAX_CAP_SEARCH`'s comment and
+        # SCHEMA.md's "605 / 245" going stale together with nothing to
+        # catch it.
+        session_relay = parse(VALID)
+        paxos_acceptor = parse(GUARDED)
+        self.assertLess(
+            len(session_relay.states)
+            * (session_relay.cap + 1) ** len(session_relay.roles),
+            machine_module._MAX_CAP_SEARCH)
+        self.assertLess(
+            len(paxos_acceptor.states)
+            * (paxos_acceptor.cap + 1) ** len(paxos_acceptor.roles),
+            machine_module._MAX_CAP_SEARCH)
 
     def test_a_machine_past_the_search_budget_reports_nothing_and_returns(self):
         # The guard's silent path, actually exercised. Patch the constant

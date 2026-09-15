@@ -387,6 +387,18 @@ class TestMalformedInputIsRejectedByNameNotByTraceback(unittest.TestCase):
     def test_roles_that_is_a_list_is_rejected(self):
         self.assert_rejected("roles", _ROLES_BLOCK, "roles: [a, b]\n")
 
+    def test_a_role_key_that_is_not_a_string_is_rejected(self):
+        # `check_machine` sorts `m.roles` to build `role_index` for the
+        # per-role cap search (machine.py, `role_index = {r: i for i, r
+        # in enumerate(sorted(m.roles))}`). A non-string role key sails
+        # past the `isinstance(roles, dict)` check and used to reach
+        # that sort as a raw `TypeError: '<' not supported between
+        # instances of 'str' and 'int'` -- the shipped CLI exiting 1
+        # with a Python traceback instead of naming the field.
+        self.assert_rejected(
+            "roles", _ROLES_BLOCK,
+            "roles:\n  1: repository\n  responder: repository\n")
+
     def test_a_states_entry_that_is_not_a_mapping_is_rejected(self):
         self.assert_rejected("states", _A_STATE, "- 5")
 

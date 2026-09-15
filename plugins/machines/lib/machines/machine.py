@@ -579,6 +579,22 @@ def check_machine(m):
         for i in range(len(members)):
             for j in range(i + 1, len(members)):
                 op_i, op_j = members[i].guard.op, members[j].guard.op
+                # `op` is validated against `OP_ATOMS` by `parse`
+                # (`_guard_field` in declaration.py), but a hand-built
+                # `Machine` is a first-class caller here too -- that is
+                # exactly what cycle B's engine constructs -- and does
+                # not go through `parse`. An operator outside `OP_ATOMS`
+                # cannot be related to anything: report the group as
+                # nondeterministic rather than indexing `OP_ATOMS` and
+                # raising `KeyError`, and rather than `.get(op,
+                # frozenset())`, which would silently treat the unknown
+                # operator as disjoint from every other guard and let a
+                # malformed machine pass this check clean. Unprovable
+                # disjointness is not disjointness; reporting is the
+                # safe direction.
+                if op_i not in OP_ATOMS or op_j not in OP_ATOMS:        # 3
+                    overlap = (op_i, op_j)
+                    break
                 if OP_ATOMS[op_i] & OP_ATOMS[op_j]:                     # 3
                     overlap = (op_i, op_j)
                     break

@@ -96,6 +96,15 @@ def parse(text):
         raise DeclarationError(
             "roles must be a mapping of role name to what it binds to",
             field="roles")
+    # `check_machine` sorts `m.roles` (to build `role_index` for the
+    # per-role cap search) -- a role key that is not a string sails past
+    # the mapping check above and then crashes that sort with a raw
+    # `TypeError` comparing e.g. `str` to `int`. Every other name in this
+    # schema is validated at parse time; the keys of `roles` were the one
+    # exception, because nothing before the `role`-scoped cap search ever
+    # needed them to be more than mapping keys.
+    for role in roles:
+        _require_string(role, "roles", "each key of ")
 
     fields = _fields_section(data)
     registers = _registers_section(data)
