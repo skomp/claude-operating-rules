@@ -1403,6 +1403,24 @@ signalling transitions from some state is already a strange declaration. **Both 
 in the plan and in `SCHEMA.md`; quoting only the second one is how the next unmeasured
 rationale gets written.**
 
+**RETRACTED, task 8 fix round 2.** The "four-role protocol with a cap of 30 trips the guard"
+example above is impossible, and it is the same `_MAX_NFA_STATES` shape one level down: edge
+weights are 0 or 1, so a cheapest route is always achievable by a *simple* path, which visits
+at most `states - 1` edges -- so phase 2 is reached at all, for **any** `limit` at **any** role
+count, only when `limit <= states - 2`. A 5-state machine can never have a subject more than 4
+signalling transitions from an accepting state, so `limit: 30` (or any limit above 3) never
+even reaches phase 2 at the role counts this cycle uses -- phase 1 clears every subject first,
+every time. The mitigating second fact above is correct and is kept as the *explanation* of
+that `states - 2` bound, not a separate comfort layered on top of it. Measured, where the
+guard actually starts to matter (a single chain, every signalling edge fired by one declared
+role among several, at `limit = states - 2` -- the largest `limit` phase 2 can ever be reached
+at, and so the one that maximises the search product): 17 states at 4 roles (`limit: 15`,
+product 1,114,112), 9 states at 6 roles (`limit: 7`, product 2,359,296), 33 states at 3 roles
+(`limit: 31`, product 1,081,344). Of the five rows in the table above, only 20 states/4 roles
+can ever actually trip the guard; the other four are always governed by the `states - 2`
+reachability bound, not the search budget. See `plugins/machines/lib/machines/machine.py`'s
+`_MAX_CAP_SEARCH` comment and `SCHEMA.md`'s cap section for the full corrected account.
+
 **If the implementer finds a shape that is both plausible and past the guard, that is a
 finding to report** — the answer is then to raise the constant or to change the algorithm, not
 to widen the claim.

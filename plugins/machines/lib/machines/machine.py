@@ -313,17 +313,26 @@ _MAX_PREFIX_LENGTH = 400
 # achievable by some *simple* path (repeating a state only adds cost), and
 # a simple path visits at most `len(states)` states, i.e. at most
 # `len(states) - 1` edges. So no subject's channel-scope distance can ever
-# exceed `len(states) - 1`, and phase 2 is reached at all -- for ANY
-# `limit`, at ANY role count -- only when `limit <= len(states) - 2`.
-# `_MAX_CAP_SEARCH` is therefore irrelevant to any machine whose largest
-# reachable `limit` (`len(states) - 2`) keeps `states * (limit + 1) **
-# roles` under budget regardless of role count: a 5-state machine can
-# never have a subject more than 4 signalling transitions from an
-# accepting state, so `limit: 30` (or any limit above 3) never even
-# reaches phase 2 -- phase 1 clears every subject first, every time, on
-# every role count. Measured, both bounds together (states, roles,
-# largest `limit` phase 2 can ever be reached at, largest `limit` this
-# guard would still permit if reached):
+# exceed `len(states) - 1`, and phase 2 is reached at all -- for any
+# `limit`, at any role count -- only when `limit <= len(states) - 2`.
+# `len(states) - 2` is also the `limit` at which the phase-2 product,
+# `states * (limit + 1) ** roles`, is LARGEST (it only grows with `limit`
+# over that range) -- which is exactly why the boundary construction below
+# fixes `limit` there: it is the worst case, not merely a reachable one.
+#
+# Whether that worst case still clears the budget depends on states AND
+# roles together, not on states alone -- a blanket "this guard is
+# irrelevant to small machines at any role count" would itself be false:
+# a 5-state machine's product at its largest reachable `limit`, 3, first
+# exceeds the budget at 9 declared roles (`5 * 4 ** 9 = 1,310,720`). For
+# the role counts this cycle's declarations and the table below actually
+# use (2-4), though, it holds: a 5-state machine can never have a subject
+# more than 4 signalling transitions from an accepting state, so
+# `limit: 30` (or any limit above 3) never even reaches phase 2 at 2, 3 or
+# 4 declared roles -- phase 1 clears every subject first, every time.
+# Measured, both bounds together (states, roles, the largest `limit`
+# phase 2 is ever reached at, the largest `limit` this guard would still
+# permit if reached):
 #
 #   states   roles   reachable-at-all bound (states-2)   budget bound   binds?
 #        5       2                                    3            446   no -- reachability wins
@@ -336,8 +345,9 @@ _MAX_PREFIX_LENGTH = 400
 # other four never reach a `limit` where the budget bound is the tighter
 # one. Where silence genuinely begins, measured by finding the smallest
 # machine (a single chain, every signalling edge fired by one declared
-# role among several, `limit = states - 2` -- the smallest `limit` at
-# which phase 2 is reached at all) whose product first exceeds budget:
+# role among several, `limit = states - 2` -- the LARGEST `limit` at
+# which phase 2 is reached at all, so the one most likely to trip the
+# guard) whose product first exceeds budget:
 # 17 states at 4 roles (`limit: 15`, product 1,114,112), 9 states at 6
 # roles (`limit: 7`, product 2,359,296), 33 states at 3 roles (`limit:
 # 31`, product 1,081,344). Below each of those state counts, at its own

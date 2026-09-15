@@ -466,12 +466,21 @@ either.
 1, so a cheapest route is always achievable by some *simple* path — repeating a state only
 adds cost — and a simple path visits at most `states` states, i.e. at most `states - 1`
 edges. So no subject's channel-scope distance can ever exceed `states - 1`, and phase 2 is
-reached at all — for *any* `limit`, at *any* role count — only when `limit ≤ states - 2`. A
+reached at all — for *any* `limit`, at *any* role count — only when `limit ≤ states - 2`.
+`states - 2` is also the `limit` at which the phase-2 product, `states × (limit + 1) ^
+roles`, is *largest* (it only grows with `limit` over that range), which is exactly why the
+boundary machines below fix `limit` there: it is the worst case, not merely a reachable one.
+
+Whether that worst case still clears the budget depends on `states` *and* `roles` together,
+not on `states` alone — a blanket "this guard is irrelevant to small machines at any role
+count" would itself be false: a 5-state machine's product at its largest reachable `limit`,
+3, first exceeds the budget at 9 declared roles (`5 × 4 ^ 9 = 1,310,720`). For the role
+counts this cycle's declarations and the table below actually use (2-4), though, it holds: a
 5-state machine can never have a subject more than 4 signalling transitions from an accepting
-state, so `limit: 30` (or any limit above 3) never reaches phase 2 at all: phase 1 clears
-every subject first, every time, regardless of role count. An earlier version of this
-paragraph missed that bound and named "`limit: 30`" as an example of this guard "already
-tripping" on a 4-role, 5-state protocol — that example was impossible, the same
+state, so `limit: 30` (or any limit above 3) never reaches phase 2 at 2, 3 or 4 declared
+roles — phase 1 clears every subject first, every time. An earlier version of this paragraph
+missed the `states - 2` bound entirely and named "`limit: 30`" as an example of this guard
+"already tripping" on a 4-role, 5-state protocol — that example was impossible, the same
 `_MAX_NFA_STATES` shape one level down, this time in the documentation rather than the code.
 
 Measured, both bounds together — the largest `limit` at which phase 2 is ever reached at all
@@ -487,12 +496,12 @@ Measured, both bounds together — the largest `limit` at which phase 2 is ever 
 
 Only the last row can ever actually trip this guard. Where silence genuinely begins, measured
 by finding the smallest single-chain machine — every signalling edge fired by one declared
-role among several, `limit = states - 2` (the smallest `limit` at which phase 2 is reached at
-all) — whose product first exceeds budget: 17 states at 4 roles (`limit: 15`, product
-1,114,112), 9 states at 6 roles (`limit: 7`, product 2,359,296), 33 states at 3 roles
-(`limit: 31`, product 1,081,344). Below each of those state counts, at its own role count,
-this guard is provably never consulted, however large `limit` is written — phase 1 clears
-everything first.
+role among several, `limit = states - 2` (the *largest* `limit` at which phase 2 is reached
+at all, so the one most likely to trip the guard) — whose product first exceeds budget: 17
+states at 4 roles (`limit: 15`, product 1,114,112), 9 states at 6 roles (`limit: 7`, product
+2,359,296), 33 states at 3 roles (`limit: 31`, product 1,081,344). Below each of those state
+counts, at its own role count, this guard is provably never consulted, however large `limit`
+is written — phase 1 clears everything first.
 
 The fact that still matters, stated as what it explains rather than as a separate comfort:
 this search is only ever reached by a subject the free, per-channel clearance above could not
