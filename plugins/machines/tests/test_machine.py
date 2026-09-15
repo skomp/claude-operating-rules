@@ -470,13 +470,6 @@ class TestAcceptingStates(unittest.TestCase):
         )
         self.assertEqual(check_machine(m), [])
 
-    def test_the_cap_check_is_skipped_entirely_when_cap_is_absent(self):
-        # Not merely "an uncapped machine happens to pass": the machine
-        # here is one that *would* fail the cap check for any cap under 2,
-        # and with no cap declared there is nothing to compare against.
-        m = _linear_machine(cap=None)
-        self.assertEqual([p for p in check_machine(m) if "cap" in p], [])
-
     def test_a_machine_that_is_entirely_accepting_and_never_terminates_passes(self):
         # The gossip shape. Every state is accepting: at any moment it is
         # fine for the conversation to stop, and it is equally fine for
@@ -660,6 +653,39 @@ class TestCapSubjects(unittest.TestCase):
         )
         self.assertEqual(check_machine(m), [])
 
+    def test_a_terminal_non_accepting_state_does_not_count_as_a_cap_goal(self):
+        # Pins the goal set: the accepting states, and only the accepting
+        # states -- not `accepting | terminal`. `start` has a cheap (one
+        # signalling transition) route to `aborted`, terminal and not
+        # accepting; if the goal set were widened to include terminal
+        # states, that route would satisfy cap 1 and this test would go
+        # quiet. The only route from `start` to an ACCEPTING state
+        # (`start` -> `mid` -> `done`) costs 2, over cap 1. Measured: with
+        # the goal set widened to `{done, aborted}`, `start`'s distance
+        # drops from 2 to 1 and the finding below disappears entirely --
+        # confirmed directly against `_signal_distances` before writing
+        # this test (see the fix-round report).
+        m = Machine(
+            "goal-set-test", "v1", "x",
+            {"role": "party"}, {"a", "b", "c"}, 1,
+            "start",
+            {
+                "start": State("start", holder="role"),
+                "mid": State("mid", holder="role"),
+                "done": State("done", holder="role", accepting=True),
+                "aborted": State("aborted", terminal=True),
+            },
+            [
+                Transition("start", "a", "role", "aborted", signal=True,
+                           effects=["escalate"]),
+                Transition("start", "b", "role", "mid", signal=True),
+                Transition("mid", "c", "role", "done", signal=True),
+            ],
+        )
+        problems = [p for p in check_machine(m) if "cap" in p]
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("start", problems[0])
+
     def test_a_per_role_cap_is_satisfied_where_a_per_channel_cap_of_the_same_size_is_not(self):
         # Measured on session-relay at limit 1: per channel reports
         # `awaiting-answer` at 2; per role reports nothing, because the two
@@ -672,7 +698,35 @@ class TestCapSubjects(unittest.TestCase):
         self.assertEqual(len(channel_problems), 1, channel_problems)
         self.assertEqual(role_problems, [])
 
+    def test_an_undeclared_by_on_a_per_role_search_edge_does_not_crash_the_checker(self):
+        # `check_machine` must return every problem and never raise, on
+        # every input -- including this one. `role_index` is built from
+        # `m.roles`, but a transition's `by` is not cross-referenced
+        # against `m.roles` anywhere before phase 2 walks the search
+        # graph by `by`; a typo'd `by` on the one edge phase 2 must
+        # actually traverse (session-relay's `answer`, from the subject
+        # `awaiting-answer`, which phase 1 cannot clear at limit 1) used
+        # to raise `KeyError` out of `_role_cap_satisfiable` instead of
+        # returning a problem list. The undeclared-role problem the
+        # top-of-function loop already reports for this transition is
+        # still present; there is simply no cap message piled on top of
+        # it, the same as any other prerequisite-missing skip in this
+        # function (R3, G3, G4).
+        text = VALID.replace("cap: 10", "cap: { limit: 1, per: role }")
+        assert text != VALID, "the cap splice matched nothing in VALID"
+        old = "on: answer, by: initiator, to: awaiting-triage, signal: true }"
+        assert old in text, "the by splice matched nothing"
+        text = text.replace(
+            old, "on: answer, by: initator, to: awaiting-triage, signal: true }")
+        m = parse(text)
+        problems = check_machine(m)  # must return, not raise
+        self.assertTrue(any("initator" in p for p in problems), problems)
+        self.assertEqual([p for p in problems if "cap" in p], [])
+
     def test_the_cap_check_is_still_skipped_entirely_when_cap_is_absent(self):
+        # Not merely "an uncapped machine happens to pass": the machine
+        # here is one that *would* fail the cap check for any cap under 2,
+        # and with no cap declared there is nothing to compare against.
         m = _linear_machine(cap=None)
         self.assertEqual([p for p in check_machine(m) if "cap" in p], [])
 
@@ -708,9 +762,15 @@ class TestCapSearchBudget(unittest.TestCase):
     def test_the_same_machine_is_reported_when_the_budget_allows_the_search(self):
         # Without this, the test above passes for a machine that was simply
         # satisfiable and proves nothing about the guard. THIS is what
-        # makes the silence above attributable to the budget.
+        # makes the silence above attributable to the budget. Asserting
+        # only "some cap problem exists" would also pass if the guard
+        # reported the wrong subject, so name `s0` -- the only one of
+        # `_phase2_machine`'s three subjects that is actually
+        # unsatisfiable (see its docstring).
         m = _phase2_machine(limit=1)
-        self.assertTrue(any("cap" in p for p in check_machine(m)))
+        problems = [p for p in check_machine(m) if "cap" in p]
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("s0", problems[0])
 
 
 if __name__ == "__main__":

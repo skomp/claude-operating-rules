@@ -449,37 +449,60 @@ guarded by a size limit before it ever runs; see the next paragraph for what tha
 an author.
 
 **A per-role cap on a subject phase 1 cannot clear is bounded, and past the bound this check
-reports nothing about that subject rather than refusing to analyse it or hanging.** The
-search space is `states × (limit + 1) ^ roles`; past roughly a million such states,
-`check_machine` gives up silently on the subjects still open, the same direction §7 already
+reports nothing about that subject rather than refusing to analyse it or hanging.** This
+bounds one subject's search, not `check_machine`'s total work: phase 2 runs once per subject
+phase 1 could not clear, so a machine with several such subjects costs a multiple of this
+bound, not the bound itself — still finite, still returns, just not "this much work, once."
+The search space for one subject is `states × (limit + 1) ^ roles`; past roughly a million
+such states, `check_machine` gives up silently on that subject, the same direction §7 already
 takes for the guard abstraction generally and §9 already takes for every finding an author
 cannot suppress — a fatal "could not analyse" on a valid machine would be worse than a
 missing finding. In practice this budget is generous for every declaration this cycle ships:
 `session-relay` (5 states, `limit: 10`, 2 roles) uses 605 of it, and `paxos-acceptor`
 (5 states, `limit: 6`, 2 roles) uses 245 — about three orders of magnitude of headroom for
-either. The more useful number for an author is the other direction: the largest `limit` a
-given shape can carry before this guard bites at all —
+either.
 
-| Shape | Fully analysed up to `limit` |
-|---|---|
-| 5 states, 2 roles | 446 |
-| 5 states, 3 roles | 57 |
-| 5 states, 4 roles | 20 |
-| 20 states, 2 roles | 222 |
-| 20 states, 4 roles | 13 |
+**A second, sharper bound applies before this one is even consulted.** Edge weights are 0 or
+1, so a cheapest route is always achievable by some *simple* path — repeating a state only
+adds cost — and a simple path visits at most `states` states, i.e. at most `states - 1`
+edges. So no subject's channel-scope distance can ever exceed `states - 1`, and phase 2 is
+reached at all — for *any* `limit`, at *any* role count — only when `limit ≤ states - 2`. A
+5-state machine can never have a subject more than 4 signalling transitions from an accepting
+state, so `limit: 30` (or any limit above 3) never reaches phase 2 at all: phase 1 clears
+every subject first, every time, regardless of role count. An earlier version of this
+paragraph missed that bound and named "`limit: 30`" as an example of this guard "already
+tripping" on a 4-role, 5-state protocol — that example was impossible, the same
+`_MAX_NFA_STATES` shape one level down, this time in the documentation rather than the code.
 
-Read the 4-role rows, not only the flattering 2-role ones: a four-role, 5-state protocol with
-`limit: 30` already trips this guard. That is not comfortable, and it is worth an author's
-attention before it ships, not after. The mitigating fact is real, but it is a second fact,
-not the first one: this search is only ever reached by a subject the free, per-channel
-clearance above could not already clear — one whose cheapest route to an accepting state
-needs *more than `limit`* signalling transitions in total, every role counted together. A
-4-role, 5-state machine with `limit: 30` whose cheapest route also needs more than thirty
-signalling transitions from some state is already a strange declaration. Both facts matter;
-a cap declaration that leans on only the second is leaning on an unmeasured rationale, which
-is exactly the shape of mistake this codebase has already shipped once, in `pattern.py`'s
-`_MAX_NFA_STATES`: a stated rationale wrong by a factor of ten, because the real limit was
-set by something else first, and only a full review found it.
+Measured, both bounds together — the largest `limit` at which phase 2 is ever reached at all
+(`states - 2`), and the largest `limit` the search budget would still permit *if* reached:
+
+| Shape | Reachable at all up to `limit` | Budget permits up to `limit` | This guard can bind? |
+|---|---|---|---|
+| 5 states, 2 roles | 3 | 446 | no — reachability is the tighter bound |
+| 5 states, 3 roles | 3 | 57 | no — reachability is the tighter bound |
+| 5 states, 4 roles | 3 | 20 | no — reachability is the tighter bound |
+| 20 states, 2 roles | 18 | 222 | no — reachability is the tighter bound |
+| 20 states, 4 roles | 18 | 13 | **yes — budget is the tighter bound** |
+
+Only the last row can ever actually trip this guard. Where silence genuinely begins, measured
+by finding the smallest single-chain machine — every signalling edge fired by one declared
+role among several, `limit = states - 2` (the smallest `limit` at which phase 2 is reached at
+all) — whose product first exceeds budget: 17 states at 4 roles (`limit: 15`, product
+1,114,112), 9 states at 6 roles (`limit: 7`, product 2,359,296), 33 states at 3 roles
+(`limit: 31`, product 1,081,344). Below each of those state counts, at its own role count,
+this guard is provably never consulted, however large `limit` is written — phase 1 clears
+everything first.
+
+The fact that still matters, stated as what it explains rather than as a separate comfort:
+this search is only ever reached by a subject the free, per-channel clearance above could not
+already clear — one whose cheapest route to an accepting state needs *more than `limit`*
+signalling transitions in total, every role counted together. That route needing that many
+transitions is exactly why it needs that many states to walk through, which is the `states -
+2` bound above, not a second fact layered on top of it. Publishing a number without checking
+which bound actually governs it is the exact mistake this codebase has already shipped once,
+in `pattern.py`'s `_MAX_NFA_STATES`: a stated rationale wrong by a factor of ten, because the
+real limit was set by something else first, and only a full review found it.
 
 ## `initial`
 

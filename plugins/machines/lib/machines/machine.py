@@ -281,11 +281,15 @@ _MAX_PREFIX_LENGTH = 400
 
 # Phase 2 of the per-role cap check (see the cap block in `check_machine`,
 # below) searches `(state, per-role counter vector)`, one counter per
-# declared role, each ranging over `0..limit`. Its state space is
-# `len(m.states) * (limit + 1) ** len(m.roles)`, and that grows fast in
-# the role count -- this guards it before the search ever runs, the same
-# way `_MAX_PREFIX_LENGTH` (above) and pattern.py's `_MAX_NFA_STATES`
-# guard their own searches before running them.
+# declared role, each ranging over `0..limit`, once for every subject
+# phase 1 could not already clear -- this guards ONE such search's state
+# space before it ever runs, the same way `_MAX_PREFIX_LENGTH` (above) and
+# pattern.py's `_MAX_NFA_STATES` guard their own searches before running
+# them. It does not bound `check_machine`'s total work on a machine with
+# more than one unresolved subject: the search below runs once per such
+# subject, so a machine with many of them costs a multiple of this bound,
+# not the bound itself -- still finite, still returns, just not "this
+# many states visited, once."
 #
 # The precedent that makes the number below non-negotiable without a
 # measurement beside it: pattern.py's `_MAX_NFA_STATES` shipped with the
@@ -302,31 +306,53 @@ _MAX_PREFIX_LENGTH = 400
 # unmeasured "the budget is a million and the real machines are in the
 # hundreds" reflex would have written.
 #
-# The more useful number for a publisher is the other direction: the
-# largest `limit` a given shape can carry before this guard bites at all
-# -- the largest integer for which `states * (limit + 1) ** roles <=
-# 1_000_000` still holds (also measured, not transcribed):
+# **A second, sharper bound applies before this one even gets consulted,
+# and an earlier version of this comment missed it -- the same
+# `_MAX_NFA_STATES` shape one level down, this time in the comment rather
+# than the code.** Edge weights are 0 or 1, so a cheapest route is always
+# achievable by some *simple* path (repeating a state only adds cost), and
+# a simple path visits at most `len(states)` states, i.e. at most
+# `len(states) - 1` edges. So no subject's channel-scope distance can ever
+# exceed `len(states) - 1`, and phase 2 is reached at all -- for ANY
+# `limit`, at ANY role count -- only when `limit <= len(states) - 2`.
+# `_MAX_CAP_SEARCH` is therefore irrelevant to any machine whose largest
+# reachable `limit` (`len(states) - 2`) keeps `states * (limit + 1) **
+# roles` under budget regardless of role count: a 5-state machine can
+# never have a subject more than 4 signalling transitions from an
+# accepting state, so `limit: 30` (or any limit above 3) never even
+# reaches phase 2 -- phase 1 clears every subject first, every time, on
+# every role count. Measured, both bounds together (states, roles,
+# largest `limit` phase 2 can ever be reached at, largest `limit` this
+# guard would still permit if reached):
 #
-#   states   roles   largest limit fully analysed
-#        5       2   446
-#        5       3    57
-#        5       4    20
-#       20       2   222
-#       20       4    13
+#   states   roles   reachable-at-all bound (states-2)   budget bound   binds?
+#        5       2                                    3            446   no -- reachability wins
+#        5       3                                    3             57   no -- reachability wins
+#        5       4                                    3             20   no -- reachability wins
+#       20       2                                   18            222   no -- reachability wins
+#       20       4                                   18             13   YES -- budget wins
 #
-# Read the 4-role rows, not only the flattering 2-role ones: a four-role,
-# 5-state protocol with `limit: 30` already trips this guard. That is not
-# comfortable, and noticing it here -- rather than after it ships -- is
-# the entire lesson `_MAX_NFA_STATES` paid for. The mitigating fact is
-# real but it is a second fact, not the first one: phase 2 is only ever
-# reached by a subject phase 1 (the free, per-channel clearance in
-# `check_machine`) could not already clear -- one whose shortest run to an
-# accepting state needs *more than `limit`* signalling transitions in
-# total, counting every role together. A 4-role, 5-state machine with
-# `limit: 30` whose shortest run also needs more than thirty signalling
-# transitions from some state is already a strange declaration. Both facts
-# belong in this comment and in SCHEMA.md; citing only the second is how
-# the next unmeasured rationale gets written.
+# Only the 20-state, 4-role row can ever actually trip this guard; the
+# other four never reach a `limit` where the budget bound is the tighter
+# one. Where silence genuinely begins, measured by finding the smallest
+# machine (a single chain, every signalling edge fired by one declared
+# role among several, `limit = states - 2` -- the smallest `limit` at
+# which phase 2 is reached at all) whose product first exceeds budget:
+# 17 states at 4 roles (`limit: 15`, product 1,114,112), 9 states at 6
+# roles (`limit: 7`, product 2,359,296), 33 states at 3 roles (`limit:
+# 31`, product 1,081,344). Below each of those state counts, at its own
+# role count, this guard is provably never consulted, however large
+# `limit` is written -- phase 1 clears everything first.
+#
+# The fact that still matters, restated correctly rather than dropped:
+# phase 2 is only ever reached by a subject phase 1 could not already
+# clear -- one whose shortest run to an accepting state needs *more than
+# `limit`* signalling transitions in total, counting every role together.
+# That is the explanation of the `states - 2` bound above (a route that
+# long needs that many states to walk through), not a separate comfort
+# layered on top of it. Both facts belong in this comment and in
+# SCHEMA.md; publishing a number without checking which bound actually
+# governs it is the exact defect `_MAX_NFA_STATES` shipped once already.
 _MAX_CAP_SEARCH = 1_000_000
 
 
@@ -880,7 +906,22 @@ def check_machine(m):
                     forward_by_role.setdefault(t.frm, []).append(
                         (t.to, t.by, 1 if t.signal else 0))
                 role_index = {r: i for i, r in enumerate(sorted(m.roles))}
-                search_affordable = (
+                # A `by` this loose is already reported by the
+                # transition-validity loop at the top of this function
+                # ("transition by names undeclared role"); phase 2 cannot
+                # index a search space by a role that was never declared,
+                # so it is skipped entirely for this machine rather than
+                # guessed at -- the same reasoning R3, G3 and G4 already
+                # apply above: skip the analysis a prerequisite it needs
+                # cannot support, rather than crash on it or fabricate an
+                # answer. Checked here, once, rather than inside
+                # `_role_cap_satisfiable`'s search loop, so a machine with
+                # an undeclared `by` costs one pass over `m.transitions`,
+                # not a `KeyError` the first time the search reaches that
+                # edge.
+                role_names_valid = all(
+                    t.by in role_index for t in m.transitions if t.signal)
+                search_affordable = role_names_valid and (
                     len(m.states) * (m.cap + 1) ** len(m.roles)
                     <= _MAX_CAP_SEARCH)
 
@@ -899,7 +940,8 @@ def check_machine(m):
                 if d <= m.cap:
                     continue  # phase 1: cleared for free
                 if not search_affordable:
-                    continue  # _MAX_CAP_SEARCH's guard: report nothing
+                    continue  # too big for the guard, or an undeclared
+                              # `by` phase 2 cannot index -- report nothing
                 if not _role_cap_satisfiable(
                         name, accepting, forward_by_role, role_index, m.cap):
                     problems.append(
