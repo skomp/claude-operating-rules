@@ -181,15 +181,36 @@ class Transition(object):
         self.guard = guard
 
 
+# The closed set of things a declared `cap` counts over. Closed for the
+# same reason `FIELD_TYPES` and `FOLDS` are: an open scope word would let
+# a publisher write something the cap-satisfiability check has no meaning
+# for. `channel` is what a bare `cap: N` has always meant -- the cap
+# bounds outbound messages across the one run as a whole -- and stays the
+# default both when `per` is written as `channel` and when the mapping
+# form is not used at all. `role` bounds each declared role's own
+# outbound messages separately: the same limit applied once per role
+# rather than once for the whole run. There is no `run` scope, because a
+# run is a channel under a different name, and no per-sender scope, because
+# the declaration has no word for a message's sender -- see SCHEMA.md.
+CAP_SCOPES = ("channel", "role")
+
+
 class Machine(object):
     def __init__(self, name, version, prefix, roles, kinds, cap,
-                 initial, states, transitions, fields=None, registers=None):
+                 initial, states, transitions, fields=None, registers=None,
+                 cap_scope="channel"):
         self.name = name
         self.version = version
         self.prefix = prefix
         self.roles = roles
         self.kinds = kinds
         self.cap = cap
+        # What `cap` counts over -- one of `CAP_SCOPES`. Meaningful only
+        # when `cap` is not `None`; carries the default `"channel"` even
+        # when there is no cap to scope, the same way `fields`/`registers`
+        # default to `{}` rather than requiring a caller to check for
+        # `None` first.
+        self.cap_scope = cap_scope
         self.initial = initial
         self.states = states
         self.transitions = transitions

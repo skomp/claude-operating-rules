@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from machines.declaration import extract_block, parse
 from machines.errors import DeclarationError
 from machines.machine import FIELDS, REQUIRED
@@ -24,6 +25,15 @@ class TestExtractBlock(unittest.TestCase):
         with self.assertRaises(DeclarationError):
             extract_block(OTHER_FENCE)
 
+# `cap: 10` below is the bare legacy spelling, kept unchanged on purpose.
+# `tests/fixtures/valid-session-relay.md` was byte-identical to this
+# declaration until `cap` gained a scope and moved to the mapping form
+# (`cap: { limit: 10, per: role }`) there -- VALID did not move with it.
+# From here on VALID is the back-compatibility regression
+# fixture for the bare-integer spelling, and the *only* place that
+# spelling is still exercised: re-syncing the two would delete that
+# coverage. See `test_the_session_relay_fixture_declares_a_per_role_cap`
+# below, which carries the same note against the fixture side.
 VALID = """
 ```machine
 machine: session-relay
@@ -119,6 +129,72 @@ class TestParse(unittest.TestCase):
         # able to say nothing about a cap rather than invent one.
         m = parse(VALID.replace("cap: 10\n", ""))
         self.assertIsNone(m.cap)
+        # `cap_scope` still carries its default even with no cap to scope
+        # -- unused, but present, the same reasoning `fields`/`registers`
+        # default to `{}` rather than `None`.
+        self.assertEqual(m.cap_scope, "channel")
+
+    def test_a_bare_integer_cap_means_per_channel(self):
+        m = parse(VALID)
+        self.assertEqual(m.cap, 10)
+        self.assertEqual(m.cap_scope, "channel")
+
+    def test_the_mapping_form_with_per_channel_is_identical_to_the_bare_form(self):
+        spelled = parse(VALID.replace("cap: 10", "cap: { limit: 10, per: channel }"))
+        self.assertEqual(
+            (spelled.cap, spelled.cap_scope),
+            (parse(VALID).cap, parse(VALID).cap_scope))
+
+    def test_per_role_lands_on_cap_scope(self):
+        m = parse(VALID.replace("cap: 10", "cap: { limit: 10, per: role }"))
+        self.assertEqual(m.cap, 10)
+        self.assertEqual(m.cap_scope, "role")
+
+    def test_the_mapping_form_requires_both_keys(self):
+        with self.assertRaises(DeclarationError) as ctx:
+            parse(VALID.replace("cap: 10", "cap: { limit: 10 }"))
+        self.assertEqual(ctx.exception.field, "per")
+        with self.assertRaises(DeclarationError) as ctx:
+            parse(VALID.replace("cap: 10", "cap: { per: role }"))
+        self.assertEqual(ctx.exception.field, "limit")
+
+    def test_an_unknown_scope_is_rejected_by_name(self):
+        # `sender` is not a word this schema uses -- there is no per-sender
+        # scope, and the declaration itself has no field named `sender`
+        # for one to mean. `run` is rejected too: a run is a channel under
+        # a different name, not a separate scope.
+        for bad in ("sender", "run", "issue"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(DeclarationError) as ctx:
+                    parse(VALID.replace(
+                        "cap: 10", "cap: { limit: 10, per: %s }" % bad))
+                self.assertEqual(ctx.exception.field, "cap")
+
+    def test_an_unknown_key_in_the_cap_mapping_is_rejected(self):
+        with self.assertRaises(DeclarationError) as ctx:
+            parse(VALID.replace(
+                "cap: 10", "cap: { limit: 10, per: role, extra: 1 }"))
+        self.assertEqual(ctx.exception.field, "extra")
+
+    def test_the_limit_obeys_the_positive_integer_rule(self):
+        # Same rule as the bare form's, including the `bool` exclusion --
+        # `per: role` does not relax what counts as a real count.
+        for value in ("0", "-1", '"ten"', "true"):
+            with self.subTest(value=value):
+                with self.assertRaises(DeclarationError) as ctx:
+                    parse(VALID.replace(
+                        "cap: 10", "cap: { limit: %s, per: role }" % value))
+                self.assertEqual(ctx.exception.field, "cap")
+
+    def test_the_session_relay_fixture_declares_a_per_role_cap(self):
+        # The fixture is the real declaration and says what the protocol
+        # means; VALID above keeps the bare form on purpose -- see the
+        # comment above VALID's definition. Do not re-sync the two: doing
+        # so would delete the only coverage this suite has of the legacy
+        # bare-integer spelling.
+        text = (Path(__file__).parent / "fixtures" / "valid-session-relay.md").read_text()
+        m = parse(text)
+        self.assertEqual((m.cap, m.cap_scope), (10, "role"))
 
     def test_unknown_top_level_field_raises_and_names_it(self):
         bad = VALID.replace("cap: 10", "cap: 10\ncaps: 12")

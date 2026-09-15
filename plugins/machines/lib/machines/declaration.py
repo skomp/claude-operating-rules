@@ -3,7 +3,7 @@ import yaml
 from .errors import DeclarationError
 from .machine import (FIELDS, REQUIRED, Machine, State, Transition, Field,
                        FIELD_TYPES, NAME, _MAX_PREFIX_LENGTH, Register, FOLDS,
-                       Guard, OP_ATOMS)
+                       Guard, OP_ATOMS, CAP_SCOPES)
 
 _FENCE = re.compile(r"^```machine[ \t]*\n(.*?)^```[ \t]*$", re.MULTILINE | re.DOTALL)
 
@@ -11,6 +11,7 @@ _STATE_KEYS = {"name", "holder", "terminal", "accepting"}
 _TRANSITION_KEYS = {"from", "on", "by", "to", "signal", "effects", "guard"}
 _REGISTER_KEYS = {"fold", "field", "on", "initial"}
 _GUARD_KEYS = {"field", "op", "register"}
+_CAP_KEYS = {"limit", "per"}
 
 
 class MachineSafeLoader(yaml.SafeLoader):
@@ -82,10 +83,7 @@ def parse(text):
     # invented number. Optional is not unvalidated, though: a cap that *is*
     # written must be a real count, and must not be a bool (Python
     # considers `True` an `int`, so `cap: true` would otherwise land as 1).
-    cap = data.get("cap")
-    if cap is not None:
-        if not isinstance(cap, int) or isinstance(cap, bool) or cap < 1:
-            raise DeclarationError("cap must be a positive integer", field="cap")
+    cap, cap_scope = _cap_field(data)
 
     kinds = data["kinds"]
     if not isinstance(kinds, list):
@@ -144,7 +142,7 @@ def parse(text):
         data["machine"], data["version"], data["prefix"],
         dict(roles), set(kinds), cap,
         data["initial"], states, transitions,
-        fields=fields, registers=registers,
+        fields=fields, registers=registers, cap_scope=cap_scope,
     )
 
 def _fields_section(data):
@@ -403,6 +401,45 @@ def _guard_field(raw):
         _require_present(spec, "register", "guard"), "register",
         "a guard's ")
     return Guard(field, op, register)
+
+
+def _cap_field(data):
+    """The optional top-level `cap`: a bare positive integer, or a mapping
+    `{ limit: <positive integer>, per: <one of CAP_SCOPES> }`. Both forms
+    say the same thing when `per` is `channel` -- the bare form is not a
+    separate rule, it is the mapping form's `channel` case spelled without
+    the mapping, and stays valid on that basis rather than as a special
+    case ported forward for its own sake. Returns `(cap, cap_scope)`;
+    absent `cap` returns `(None, "channel")` -- the scope is meaningless
+    with no cap to scope, but the attribute must still exist on every
+    `Machine`, mapping form or not.
+
+    Only shape and spelling are validated here. What `channel` and `role`
+    each count, and whether a declared cap is large enough, is
+    `check_machine`'s question, not `parse`'s -- the same split every
+    other cross-referencing check in this module keeps.
+    """
+    if "cap" not in data:
+        return None, "channel"
+    cap = data["cap"]
+    if isinstance(cap, dict):
+        _reject_unknown(cap, _CAP_KEYS, "cap")
+        limit = _require_present(cap, "limit", "cap")
+        per = _require_string(
+            _require_present(cap, "per", "cap"), "per", "a cap's ")
+        if per not in CAP_SCOPES:
+            raise DeclarationError(
+                "cap has per %r, which is not one of %s"
+                % (per, sorted(CAP_SCOPES)), field="cap")
+        _require_positive_cap(limit)
+        return limit, per
+    _require_positive_cap(cap)
+    return cap, "channel"
+
+
+def _require_positive_cap(value):
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise DeclarationError("cap must be a positive integer", field="cap")
 
 
 def _bool_field(raw, key, default):

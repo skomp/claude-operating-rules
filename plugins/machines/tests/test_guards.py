@@ -6,32 +6,28 @@ from machines.machine import check_machine
 from tests.test_declaration import VALID  # the known-good declaration
 
 
-# `GUARDED` grows across three tasks of this cycle, the way `VALID`
+# `GUARDED` grew across three tasks of this cycle, the way `VALID`
 # (test_declaration.py) stays fixed but `test_machine.py`'s tests mutate
-# copies of it: Task 3 added `fields`; Task 5 (this one) adds a `guard:`
-# mapping to four of the transitions below; Task 7 will convert the bare
-# `cap: 6` to the mapping form -- the only growth left. That growth is
-# intentional, not drift -- each task's tests build on what the one before
-# it left in place -- and this is the same declaration `valid-paxos-acceptor.md`
-# (a fixture Task 9 will create) carries.
+# copies of it: Task 3 added `fields`; Task 5 added a `guard:` mapping to
+# four of the transitions below; Task 7 converted the bare `cap: 6` to the
+# mapping form `cap: { limit: 6, per: role }`. That growth is now
+# finished -- this is, from here on, the same declaration
+# `valid-paxos-acceptor.md` (a fixture Task 9 creates) carries, and
+# nothing after this task changes it further.
 #
-# Two controller rulings shape the block exactly as written here:
+# `GUARDED` and the Paxos fixture are deliberately NOT allowed to diverge
+# the way `VALID` and `tests/fixtures/valid-session-relay.md` do (see the
+# comment above `VALID` in test_declaration.py): that pair keeps one
+# bare-form regression fixture on purpose, but nothing here wants a
+# second diverged pair, and Task 9's fixture is meant to be the same
+# declaration as this constant, byte for byte where it matters.
 #
-# Ruling A -- `cap: 6` is bare, not `{ limit: 6, per: role }`. Measured:
-# `declaration.py`'s cap handling accepts only `isinstance(cap, int)`, so
-# the mapping form raises `DeclarationError` until Task 7 lands. Do not
-# write the mapping form before then.
-#
-# Ruling B -- four of the seven transitions below now carry `guard:`.
-# Left unguarded, this declaration has two genuinely nondeterministic
-# groups (`idle` on `prepare` by `proposer`, and `promised` on
-# `accept-request` by `proposer`), which the shipped determinism check in
-# `check_machine` still reports for both -- a guard narrows *when* a
-# transition fires, and nothing in this cycle's determinism check reads a
-# guard to know that yet. Task 6 replaces that check with the rule that
-# makes a disjoint guarded branch legal;
-# `test_the_paxos_fixture_is_well_formed_apart_from_its_guarded_branches`,
-# below, filters those two reports out until then.
+# Ruling B -- four of the seven transitions below carry `guard:`. Left
+# unguarded, this declaration has two genuinely nondeterministic groups
+# (`idle` on `prepare` by `proposer`, and `promised` on `accept-request`
+# by `proposer`); the determinism rule in `check_machine` treats a
+# disjoint guarded branch as legal, which is why `test_the_paxos_fixture_is_well_formed`
+# below reports no problems for this declaration.
 GUARDED = """
 The paxos-acceptor protocol carries a single Paxos ballot number as a
 declared header field, and one register -- `highest_promised` -- that
@@ -52,7 +48,7 @@ fields:
   ballot: int
 registers:
   highest_promised: { fold: max, field: ballot, on: [prepare], initial: 0 }
-cap: 6
+cap: { limit: 6, per: role }
 initial: idle
 states:
   - { name: idle,     holder: proposer, accepting: true }
@@ -151,6 +147,12 @@ class TestFields(unittest.TestCase):
         m = parse(splice_guarded(
             "ballot: int", "ballot: int\n  blocking: bool"))
         self.assertEqual(m.fields["blocking"].type, "bool")
+
+
+class TestCap(unittest.TestCase):
+    def test_the_paxos_declaration_declares_a_per_role_cap(self):
+        m = parse(GUARDED)
+        self.assertEqual((m.cap, m.cap_scope), (6, "role"))
 
 
 class TestRegisters(unittest.TestCase):

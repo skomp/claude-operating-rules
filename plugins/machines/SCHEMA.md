@@ -340,16 +340,56 @@ written to stand on its own, next to the R1-R4 checks — for a reader who gets 
 
 ## `cap`
 
-**Type:** integer, and when written it must be a *positive* integer — `0`, a negative
-number, and a non-integer (including a quoted string) are all rejected. **Optional.** It is
-the one top-level field a declaration may leave out.
+**Type:** either a bare positive integer, or a mapping `{ limit: <positive integer>, per:
+<channel|role> }`. **Optional.** It is the one top-level field a declaration may leave out.
+
+The two forms say the same thing when `per` is `channel`: `cap: 10` and
+`cap: { limit: 10, per: channel }` parse to an identical machine. The bare form is not a
+separate rule kept around for its own sake — it is the mapping form's `channel` case,
+spelled without the mapping, because `channel` was the only scope this field ever needed
+until it gained a second one. `limit` obeys the same positive-integer rule either way —
+`0`, a negative number, a non-integer (including a quoted string), and a boolean (Python
+considers `True` an `int`) are all rejected, in both forms, by the same check. In the
+mapping form both keys are required — `{ limit: 10 }` and `{ per: role }` are each rejected
+by name for the key they are missing — and any key besides `limit` and `per` is rejected by
+name too; there is no default `per` a declaration can fall back on, for the same reason
+there is no default `cap` at all: a scope the publisher did not write is not a scope they
+agreed to.
 
 The transition cap: the maximum number of outbound messages this machine's engine will ever
-emit for one run. It caps outbound messages, not transitions and not comments — a purely
-local move (`signal: false`) is not an outbound message, so it does not count against `cap`
-even though it is a transition; and a bundle's "ten comments per sender" rule is that
-bundle's choice of value, not the framework's. A cap cannot be disguised as `true`: the
-parser rejects a boolean here even though Python considers `True` an `int`.
+emit, within its scope, for one run. It caps outbound messages, not transitions and not
+comments — a purely local move (`signal: false`) is not an outbound message, so it does not
+count against `cap` even though it is a transition; and a bundle's own "ten messages per
+role per run" rule is that bundle's choice of value, not the framework's.
+
+### What a cap's scope counts
+
+`per` says what the limit is measured against, not what counts as a message — that answer
+(outbound, `signal: true`, above) is the same for every scope.
+
+- **`channel`** — the whole run shares one budget. Every outbound message from every role
+  counts against the same `limit`, the way a bare `cap: 10` has always been read.
+- **`role`** — each declared role (see `roles`, above) gets its own budget of `limit`
+  messages. A two-role protocol's two roles are counted, and capped, separately, rather than
+  drawn from one shared pool.
+
+**There is no `run` scope**, because a run is a channel under a different name here — `per:
+run` would be a second spelling of `per: channel`, not a third scope, so the schema does not
+carry one. **There is no per-sender scope**, and `per: sender` is rejected by name, not
+accepted as another spelling of `role`: this declaration language declares `roles`, checked
+against every `holder` and `by`, and has no separate field that names who sent one
+particular message. `role` counts what the schema can name.
+
+That said, `role` and a genuine per-sender count are the same thing only as long as exactly
+one participant ever holds a given role in a run, which is what every declaration in this
+cycle assumes. A future cycle that let more than one participant share a role at once would
+make the two diverge — the budget would still be counted per role, not per the participant
+that happens to be sending — and would need its own new scope if a bundle wanted the
+narrower count. Nothing here anticipates that; `role` means what it says today, one bound
+per declared role.
+
+A cap cannot be disguised as `true`: the parser rejects a boolean here even though Python
+considers `True` an `int`.
 
 **A protocol needs no cap, and this framework does not require one.** Leaving `cap` out
 means exactly one thing — *this protocol declares no bound on how many messages a run may
