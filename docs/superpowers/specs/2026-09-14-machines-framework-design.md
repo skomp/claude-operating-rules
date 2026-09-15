@@ -2,8 +2,10 @@
 
 **Written** 2026-09-14. **Tracked in** `claude-operating-rules#26`. **Handoff**
 `docs/handoffs/2026-09-14-signal-framework.md` on `origin/session-relay`.
-**Status** design agreed; **cycle A is built** — the declaration schema and the checker
-ship in `plugins/machines/`. Cycles B, C and D are not started.
+**Status** design agreed; **cycle A is built, and cycle A.1 is built on top of it** — the
+declaration schema and the checker, now with typed header fields, registers, guards and a
+scoped, strengthened cap check, ship in `plugins/machines/`. Cycles B, C and D are not
+started.
 **Amended** during cycle A with the four changes agreed after this spec merged in
 `PR: claude-operating-rules#29` and tracked in `claude-operating-rules#28`: they are folded
 into §6, §7, §8, §9 and the new §12, and the separate changes document is gone.
@@ -12,14 +14,20 @@ held only in issues: typed header fields and guards (`claude-operating-rules#31`
 monotonic clock in the envelope (`#32`), the classification of transport verbs by what
 their result touches (`#34`), and the two later comments on `#28` — the limits of the
 accepting-state checks, and the finding that `session-relay`'s addressing half has no
-channel. They are folded into §4, §5, §6, §7, §8, §9, §10, §11, §13 and §14.
+channel. They are folded into §4, §5, §6, §7, §8, §9, §10, §11, §13 and §14. **Cycle A.1
+built the first of those five decisions, and the accepting-state limit's fix, into the
+schema and checker; the clock and the verb classification are still unbuilt, and the
+addressing question is still open for cycle D.**
 
 **Read every "shipped" and "not built" mark in this document as load-bearing.** Cycle A
-shipped a schema and a checker; **everything this 2026-09-15 amendment adds is unbuilt.**
-There are no guards, no typed header fields, no clock, no verb classification and no engine
-in `plugins/machines/` today. Three places where the *shipped* code and this document
-already disagree are named where they occur — §7's effect vocabulary, §9's verb check, and
-§9's cap check — rather than being smoothed over.
+shipped a schema and a checker; cycle A.1 shipped typed header fields, registers, guards,
+guard determinism, and a scoped, strengthened cap check into the same schema and checker —
+**everything else this 2026-09-15 amendment adds is still unbuilt.** There is still no
+clock, no verb classification and no engine in `plugins/machines/`. Two places where the
+*shipped* code and this document still disagree are named where they occur — §7's effect
+vocabulary and §9's verb-against-transport check — rather than being smoothed over; both
+wait on cycle C. §9's cap check no longer diverges: A.1 built the stronger form this
+document already called for.
 
 ---
 
@@ -104,7 +112,7 @@ item 1.
 | Layer | Holds | Checked by |
 |---|---|---|
 | **Channel** | which channel, who holds it, who acts next, **the order of the messages and their identity** | linearity; **the envelope's clock (the envelope subsection below) — not built** |
-| **Protocol** | states, legal kinds per state, which states accept, which states are terminal, an optional cap, **the typed header fields a transition may test — not built** | product construction, at install |
+| **Protocol** | states, legal kinds per state, which states accept, which states are terminal, an optional cap, **the typed header fields a transition may test — built in cycle A.1** | product construction, at install |
 | **Content** | the message body | **nothing, deliberately** |
 
 The third row is the point. The framework holds no content, so it can never *appear* to
@@ -112,10 +120,10 @@ verify content. A machine that looked like it checked meaning would be worse tha
 because a reader would believe the semantic rules were verified.
 
 **Checkable:** alternation, the legal kinds in each state, a declared cap, whether a run can
-always reach somewhere it may legitimately stop, which role acts next, **and — once §7's
-typed fields land — that a guard names a declared field, of a declared type, under a
-comparison that type supports.** **Not checkable:** whether a draft states a new fact,
-whether a sender set a flag honestly, **which way a guard will go** (§7 gives up that
+always reach somewhere it may legitimately stop, which role acts next, **and, since cycle
+A.1 built §7's typed fields and guards, that a guard names a declared field, of a declared
+type, under a comparison that type supports.** **Not checkable:** whether a draft states a
+new fact, whether a sender set a flag honestly, **which way a guard will go** (§7 gives up that
 precision deliberately, to keep the rest decidable), **whether a state marked `accepting`
 really owes nothing** (§11.9 — the mark has no structural cross-check and can never have
 one), and — see §7 — **whether the protocol terminates, which is not a property the
@@ -275,15 +283,18 @@ world_reads[]        results of world-touching verbs that were folded in, each n
 
 Claude reads that and writes the content. **The framework never sees the content.**
 
-**`remaining` promises something the schema cannot supply, and cycle B meets it on day one.**
-This line reads *"cap headroom for **this sender** on **this channel**"*; §7 declares the cap
-**per bundle**, as one number for a run, and §10's item 1 records "a cap scoped per sender or
-per channel" as a thing the schema cannot express. **The verdict and the schema disagree, and
-the disagreement predates this amendment.** The engine is what has to compute the number, so
-cycle B is where it must be settled: either `remaining` is re-specified as run headroom (and
-`session-relay`'s *"ten comments per sender per issue"* stops being expressible, which the
-backport will notice), or the schema gains a scope for the cap (which is item 1, and which is
-schema work — §13's A.1). §11.12 carries it.
+**`remaining` promised a number the schema could not supply; cycle A.1 settled it.** This
+line reads *"cap headroom for **this sender** on **this channel**"*; §7 declared the cap
+**per bundle**, as one number for a run, and §10's item 1 recorded "a cap scoped per sender or
+per channel" as a thing the schema could not express. **The verdict and the schema disagreed,
+and the disagreement predated this amendment.** §11.12 carries the choice made: the schema
+gained a scope, `cap: { limit, per }`, `per` one of `channel` or `role` — not `sender`, which
+is rejected by name, because this declaration language names `roles` and has no field for who
+sent one particular message. `role` and a genuine per-sender count coincide only as long as
+exactly one participant ever holds a given role in a run, which every declaration in this
+cycle assumes; a future cycle that let more than one participant share a role would need a
+narrower scope of its own. Cycle B reads `m.cap_scope` to compute `remaining` — the number the
+verdict promises is no longer one the schema cannot supply.
 
 `guards[]` is not debugging output. §6's later paragraph on agent-effects argues that a
 reader of a thread must be able to separate what the protocol *demanded* from what Claude
@@ -344,8 +355,8 @@ place it can be checked.
 
 **Closed language.** States — each of which may be *accepting*, *terminal*, both or neither —
 roles, message kinds, transitions, an optional cap, effects that **name verbs the
-transport declares**, and — **not built; see the guards subsection below** — named typed
-header fields with comparison guards over them. **No expressions, no scripts, no callbacks.**
+transport declares**, and named typed header fields with comparison guards over them — see
+the guards subsection below. **No expressions, no scripts, no callbacks.**
 
 The closure is load-bearing twice over, and this is the design's central observation:
 
@@ -377,13 +388,32 @@ and twelve in the prose is hard to produce and obvious when produced.
 
 ### Typed header fields, and the guards that test them
 
-**Not built.** `claude-operating-rules#31`. This is a **schema** change, so it belongs with
-cycle A's deliverable rather than the engine's — see §13's A.1 proposal.
+**Built, in cycle A.1.** `claude-operating-rules#31`. This was a **schema** change, and it
+landed as cycle A.1's central deliverable — see §13's A.1 proposal.
 
-Today a transition fires on a message `kind` and on nothing else. The machine cannot see a
-value. `session-relay` already pays for that: its `blocking`, `seq` and `ref` are invisible
-to the machine (§10). A pattern is the right tool for matching a prefix; **a pattern cannot
-order two numbers. The schema needs integers.**
+**The shipped syntax:** a field is one of exactly two types, `int` or `bool` — deliberately
+no `string`, because nothing in this schema defines a string fold or a string ordering for a
+guard to compare against. A register folds one declared field across the trace by one of
+exactly two folds, `max` or `last`; `min` and `first` are the same shape and stay out because
+no protocol in this cycle needs them, `count` stays out because it invites quorum — an
+aggregation over a set of messages, which is exactly the boundary two subsections below
+forbids — and `sum` stays out because it can turn a running fold of a `bool` field into an
+`int`, breaking the guarantee that a register's value stays its field's declared type for its
+whole life. `argmax` — remembering which message produced the maximum, not just the scalar —
+is the fold most likely to be reached for next, and stays out too: it needs a second
+remembered value with its own type, which is a larger feature than one more fold word, and it
+should be designed on purpose rather than backed into. A guard is a structured comparison,
+`{ field, op, register }`, never an expression: one declared field compared to one declared
+register by one of six named operators (`eq`, `ne`, `lt`, `le`, `gt`, `ge` — never a bare
+symbol, and ordering only on an `int` field). **There is deliberately no comparison against a
+literal.** A guard names two remembered-or-received quantities, never a constant a publisher
+could write into the declaration — `ballot > 5` has no spelling in this language, on purpose:
+the value a guard compares against must be derivable from the trace and nowhere else.
+
+Before this landed, a transition fired only on a message `kind`, never on a value.
+`session-relay` already paid for that: its `blocking`, `seq` and `ref` were invisible to the
+machine (§10). A pattern is the right tool for matching a prefix; **a pattern cannot order
+two numbers. The schema needed integers.**
 
 Two tests, and they buy different things:
 
@@ -628,10 +658,11 @@ after a shared prefix"* are both decidable.
 **Three defects in the shipped arrangement, all from `claude-operating-rules#28`, all
 verified 2026-09-15 by reading `plugins/machines/lib/machines/registry.py`:**
 
-1. **Prefix validation lives in `check_all`, not in `check_machine`.** A prefix that will not
-   compile is a property of one machine, not of a set, and `check_machine` is the documented
-   answer to *"is this machine well-formed"* — so a caller using it directly gets no prefix
-   validation at all. Moving it is §11.7's deferred item.
+1. **Prefix validation lived in `check_all`, not in `check_machine` — resolved in cycle
+   A.1.** A prefix that will not compile is a property of one machine, not of a set, and
+   `check_machine` is the documented answer to *"is this machine well-formed"*, so a caller
+   using it directly used to get no prefix validation at all. `check_machine` now calls
+   `prefix_problem` itself; see §11.7.
 2. **The collision skip keys on `name` alone.** `check_all` skips a pair whose `name` matches,
    on the correct reasoning that one protocol's versions are its history and not a collision.
    But two *different publishers* who choose one name are skipped by the same line, and they
@@ -670,46 +701,77 @@ Two more checks belong here once the transport declaration exists, both from
 
 ### The guard checks, and why they cost the checker nothing
 
-**Not built.** `claude-operating-rules#31`. Per §7, the checker abstracts a guard into a
-branch with both outcomes possible, so nothing above this line becomes harder to decide.
-What it gains is three static checks that would otherwise be runtime failures:
+**Built, in cycle A.1.** `claude-operating-rules#31`. Per §7, the checker abstracts a guard
+into a branch with both outcomes possible, so nothing above this line became harder to
+decide. What it gains is three static checks that would otherwise be runtime failures:
 
-- a guard names a **declared** field;
-- the field's **type supports the comparison** — equality on any declared type, ordering only
-  on a numeric one;
+- a guard names a **declared** field (G1) and a **declared** register (G2);
+- the field's **type supports the comparison** — equality on either declared type, ordering
+  only on `int` (G3), and the guard's field and its register's field are the same declared
+  type (G4);
 - the remembered value a guard compares against is **derivable from the trace**, not from
-  anywhere else.
+  anywhere else — this needs no code, because the syntax admits no other source: a register's
+  only declared source is a fold over a field of messages of a declared kind, and there is no
+  spelling anywhere in this schema for a register to come from anything else.
+
+Guards also changed what two guarded transitions sharing a trigger may mean: two members that
+share `from`, `on` and `by` but disagree on `to` are accepted **only** when every one of them
+carries a guard, all of those guards compare the same field to the same register, and no two
+of their operators' atom sets intersect — a strengthening of the determinism check this
+section already had, not a separate rule beside it. **No guard-free machine's verdict
+changed**: a transition with no guard, or a guard naming a different field or register than
+the rest of its group, is reported exactly as an unguarded pair always was.
 
 And one thing the checker deliberately does **not** report: a guard that can never fire. The
 abstraction is what makes the rest decidable, and it is exactly what throws away the
 information needed to find a dead branch. **A loss of precision, stated, rather than a
 soundness claim that is not true.**
 
-### The cap check is weak, and cycle A measured how weak
+### The cap check, strengthened in cycle A.1
 
-**Shipped, and known to be too weak.** `claude-operating-rules#28`, second comment.
+**Weak at cycle A, strengthened in cycle A.1.** `claude-operating-rules#28`, second comment.
 
-`check_machine` measures the shortest run from `initial` to an accepting state and counts the
-signalling transitions on it. **If `initial` is itself accepting, that count is 0, and no
-positive cap can ever be reported.**
+Cycle A's `check_machine` measured the shortest run from `initial` to an accepting state and
+counted the signalling transitions on it. **If `initial` was itself accepting, that count was
+0, and no positive cap could ever be reported.**
 
 `session-relay` has exactly that shape. Its `unopened` state is initial and is accepting,
 because the initiator has filed nothing and owes nothing (§10, row 6). **So the shipped
-fixture no longer exercises the check at all**, and a machine built inside the tests had to
+fixture no longer exercised the check at all**, and a machine built inside the tests had to
 take over that job.
 
-**The current check is correct, and `SCHEMA.md` says precisely what it measures. It is weak,
-not wrong.** The stronger form:
+**Cycle A.1 shipped the stronger form, and it is not the sentence this section used to
+propose.** The check now asks the question from every **subject** — every state reachable
+from `initial` that is neither accepting nor terminal, i.e. every state where something is
+still owed and the run can still move — rather than only from `initial`:
 
-> **From every non-accepting state, an accepting or a terminal state must be reachable
-> within `cap` signalling transitions.**
+> **From every subject, an *accepting* state must be reachable within `cap` signalling
+> transitions.**
 
-That form is not vacuous for a machine whose initial state is accepting, because it asks the
-question at every state where something is owed rather than only at the start. It remains
-skipped entirely when no cap is declared — §7's rule that an absent cap means *no bound*, not
-a default, is untouched.
+**The goal set is the accepting states, and only the accepting states — not `accepting |
+terminal`.** An earlier draft of this sentence said *"an accepting or a terminal state must
+be reachable"*, which is right for the check that asks whether a run can escape limbo at all
+(§4's *"every state must be able to reach an accepting or a terminal state"* — an abort
+escapes limbo, so a terminal state counts there) and wrong for this one, which asks whether
+the declared budget buys somewhere *good*: a state where nothing is owed on purpose, not a
+state the run gave up in. An abort is not somewhere good. Two checks, two questions, two goal
+sets; widening this check's goal set to match the escape-limbo wording is how a later session
+would "fix" the shipped cap check into a regression — it would make a cap that only reaches
+the error state look satisfiable, when it is exactly the cap that cannot be satisfied. A test
+now fails if the goal set widens.
 
-**This is checker work, not engine work.** §13's A.1 proposal is where it should land.
+A subject's route cost depends on the cap's scope, `per` (§7, §11.12): under `channel`, every
+role's signalling transitions draw from the one shared budget, and the cost is the fewest
+signalling transitions on the cheapest route, computed for every subject at once. Under
+`role`, the cost that matters is the *worst single role* on the route, because each role is
+capped separately; a subject whose channel-scope route already fits is satisfiable under
+`role` scope for free, and whatever is left needs an actual search, bounded before it runs —
+see "What the checker cannot check", below, for `_MAX_CAP_SEARCH`'s silent path.
+
+It remains skipped entirely when no cap is declared — §7's rule that an absent cap means *no
+bound*, not a default, is untouched.
+
+**This was checker work, not engine work, and A.1 delivered it.**
 
 ### What the checker cannot check, and will not pretend to
 
@@ -717,10 +779,10 @@ a default, is untouched.
   cross-checked against a state's out-degree; `holder` is cross-checked against each outgoing
   `by`. `accepting` is cross-checked against nothing, because *"is anything owed here"* is a
   question about meaning and the checker checks structure. An author who marks a waiting
-  state accepting passes every check. **This limit is permanent, and `SCHEMA.md` must say so**
-  rather than leave a reader to assume the mark is verified. The conservative default (`false`)
-  makes the *common* mistake — marking nothing — loud; it does nothing about the deliberate
-  one. See §11.9.
+  state accepting passes every check. **This limit is permanent, and `SCHEMA.md` now says
+  so** — cycle A.1 added it — rather than leaving a reader to assume the mark is verified. The
+  conservative default (`false`) makes the *common* mistake — marking nothing — loud; it does
+  nothing about the deliberate one. See §11.9.
 - **A branch whose every route ends badly is not reported, and that was decided rather than
   overlooked.** A non-accepting state whose every future is a terminal non-accepting state is
   legal on purpose. *"Once the versions are incompatible, every route aborts"* is a true thing
@@ -728,6 +790,19 @@ a default, is untouched.
   the checker has one severity — so the report would be an unsuppressible false positive on a
   valid machine. **Refused.** It is the first candidate for a non-fatal tier if one ever
   exists. See §11.8.
+- **A per-role cap search past a stated size gives up silently on the one subject it
+  concerns, rather than refusing to analyse it or hanging — a third thing the checker does
+  not tell you.** The per-role cap check's second phase (the cap-check subsection above)
+  searches a space of `states × (limit + 1) ^ roles`; past roughly a million such states,
+  `_MAX_CAP_SEARCH` stops that one subject's search and reports nothing about it, the same
+  direction this section already takes for the guard abstraction and for a doomed branch,
+  above. Because a cheapest route is always a simple path, no subject's channel-scope
+  distance can exceed `states - 1`, so this search is reached at all only when
+  `limit ≤ states - 2` — measured, it is never consulted below 17 states at 4 declared
+  roles, 9 states at 6 roles, or 33 states at 3 roles, always with `limit` at or near
+  `states - 2`. Neither of this cycle's shipped declarations comes close: `session-relay`
+  (5 states, `limit: 10`, 2 roles) and `paxos-acceptor` (5 states, `limit: 6`, 2 roles) are
+  both settled by the free, per-channel clearance alone and never reach this search at all.
 
 **This subsumes the router.** An unclaimed prefix is a machine-not-found, reported rather
 than dropped. Two protocols claiming one prefix are an installation error rather than a
@@ -823,9 +898,9 @@ a reader of either document gets the same answer:
 
 | # | What the schema cannot express | Disposition |
 |---|---|---|
-| 1 | a cap scoped per sender or per channel — a declared cap is one number for a run, and a machine may now decline to declare one at all | **open, and cycle B cannot leave it open** — §6's `remaining` already promises per-sender headroom the schema cannot express. See §11.12 |
+| 1 | a cap scoped per sender or per channel — a declared cap is one number for a run, and a machine may now decline to declare one at all | **settled in cycle A.1** — the schema gained `cap: { limit, per }`, scoped per `channel` or per `role` (not per sender, which has no field to name it by). See §11.12 |
 | 2 | any message attribute beyond `kind`, so `blocking=`, `seq=` and `ref=` are invisible to it | **splits into three** — see below |
-| 3 | a guard on a transition | **settled by `#31`** — §7's typed fields and guards. Not built |
+| 3 | a guard on a transition | **settled by `#31`** — §7's typed fields and guards, built in cycle A.1 |
 | 4 | an epsilon or otherwise internal move. Every transition needs a `kind`, so a state that consumes nothing cannot be left. This is a **limit of the schema**, not merely a consequence of the layering | **open, and now consequential** — see §11.10, where it is what bounds the uncapped-local-loop gap |
 | 5 | an initial state that is the channel's creation | **settled in cycle A** by the explicit `unopened` state and a `triage` transition out of it |
 | 6 | an effect attached to a state rather than to a transition, so a terminal state with two incoming transitions repeats its effects | **open** |
@@ -968,10 +1043,12 @@ that delegation works.**
    decision to *"count only the outbound messages sent from a state machine"*, and §7 now says
    so. The ambiguity was in the design rather than in the implementation, which is why it is
    recorded here: a later cycle reading the old wording would reintroduce it.
-7. **Where prefix validation lives — still open, and now proposed for A.1 rather than B.**
-   It is in `check_all` rather than in `check_machine`. `check_machine` is the tidier home — a
-   prefix that will not compile is a property of one machine, not of a set — and it is checker
-   work, not engine work. §13's A.1 proposal is where it should go.
+7. **Where prefix validation lives — resolved in cycle A.1.** `check_machine` now calls
+   `prefix_problem` itself, so a caller who uses `check_machine` directly — the documented
+   answer to *"is this machine well-formed"*, and what cycle B's engine will do — gets prefix
+   validation without also running `check_all`'s pairwise collision check. `check_all` still
+   calls `prefix_problem` too, to decide which machines are fit to compare for a collision;
+   the two calls answer different questions and neither makes the other redundant.
 8. **Whether a branch whose every future ends badly should be reported — settled on
    2026-09-15: do not report it.** A non-accepting state that can reach only terminal
    non-accepting states commits the run, on entry, to ending with something still owed.
@@ -988,11 +1065,12 @@ that delegation works.**
    each outgoing `by`; `accepting` is cross-checked against nothing, because "is anything owed
    here" is a question about meaning, not a graph property. An author who marks a waiting state
    accepting passes every check. The conservative default makes the *common* mistake (marking
-   nothing) loud; it does nothing about the *deliberate* one. **`SCHEMA.md` must say the mark
-   is unverified**, rather than leave a reader to assume it is checked like the other two —
-   that is the part still to do, and it is documentation, not code. Whether a heuristic is
-   worth having — a state whose outgoing transitions are all `by` a role other than its own
-   `holder` is where waiting happens — is untested and unproposed.
+   nothing) loud; it does nothing about the *deliberate* one. **`SCHEMA.md` now says the mark
+   is unverified** — cycle A.1's documentation task added it, in close to these words:
+   *"nothing here can confirm that a state a publisher marked accepting really is a fine
+   place for a run to stop"* … *"Trusting `accepting` means trusting whoever wrote it."*
+   Whether a heuristic is worth having — a state whose outgoing transitions are all `by` a
+   role other than its own `holder` is where waiting happens — is untested and unproposed.
 10. **The uncapped local loop, and whether it needs a second bound.**
     `claude-operating-rules#28` states it as a requirement: the cap counts only signalling
     transitions, so a machine can loop on `signal: false` moves for ever, reach a terminal
@@ -1032,13 +1110,13 @@ that delegation works.**
     the session that holds it. **The decision belongs to cycle D**, which is where
     `session-relay` is re-expressed and where the cost of either choice is real. Option 1 is
     the recommendation and nothing here has ruled option 2 out.
-12. **The cap's scope — found on 2026-09-15, and it is a contradiction inside this document
-    rather than a gap.** §6's verdict promises `remaining` as *"cap headroom for this sender on
-    this channel"*. §7 declares the cap per bundle, as one number for a run. §10's item 1
-    records per-sender and per-channel scoping as something the schema cannot express. **All
-    three cannot be true.** It has been invisible because nothing has had to compute the number
-    yet; **the engine is the first thing that does, so cycle B cannot start without an answer.**
-    Two ways out, and they cost differently:
+12. **The cap's scope — found on 2026-09-15, and settled in cycle A.1.** §6's verdict
+    promised `remaining` as *"cap headroom for this sender on this channel"*. §7 declared the
+    cap per bundle, as one number for a run. §10's item 1 recorded per-sender and per-channel
+    scoping as something the schema could not express. **All three could not be true.** It had
+    been invisible because nothing had to compute the number yet; the engine is the first
+    thing that does, so cycle B could not start without an answer. Two ways out, and they cost
+    differently:
 
     - **Re-specify `remaining` as run headroom.** Cheapest, and it makes §6 honest about what
       §7 declares. The price lands on cycle D: `session-relay`'s cap is *ten comments per
@@ -1049,8 +1127,16 @@ that delegation works.**
       schema change and therefore A.1 work (§13), not B work, and it is the option that leaves
       the backport expressible.
 
-    **Not decided here.** The first option is cheaper now and the second is cheaper at cycle D,
-    and the author is the one who knows which of those matters.
+    **The author chose the second option, and cycle A.1 shipped it — with a narrower scope
+    than this item first proposed.** `cap` may now be written `{ limit, per }`, `per` one of
+    `channel` (a bare `cap: 10` still means this) or `role` — **not `sender`**. This
+    declaration language names `roles`, checked against every `holder` and `by`; it has no
+    field that names who sent one particular message, so `per: sender` is rejected by name
+    rather than accepted as another spelling of `role`. `role` and a genuine per-sender count
+    are the same thing only as long as exactly one participant ever holds a given role in a
+    run, which every declaration in this cycle assumes; a cycle that let more than one
+    participant share a role would need its own narrower scope. §6's `remaining` is settled
+    the same way — see there.
 13. **What the clock's scope is when a channel is not an issue.** §4 fixes the clock per
     channel. `session-relay`'s `seq` is per sender *per issue*, and the two upstream comments
     on a linked issue are a separately capped thread from the downstream discussion — so
@@ -1143,21 +1229,24 @@ walk is the cheapest defect-finder in the whole design, and it costs nothing but
 **It has now been run** — §10 has the result. It found a defect nothing predicted, which is
 the argument for it.
 
-### Proposal — a cycle A.1, ahead of B
+### Cycle A.1, delivered ahead of B
 
-**This is a proposal from the session that folded the 2026-09-15 amendments in, not a
-decision by the author. Nothing has been restructured on its authority.**
+**This was a proposal from the session that folded the 2026-09-15 amendments in. The author
+accepted it, and cycle A.1 shipped in `plugins/machines/` on 2026-09-15 — the table below
+records what was proposed; the paragraph after "the three shipped defects in §9", further
+down, records what did and did not land.**
 
-Three of the things this amendment adds are **not engine work**:
+Three of the things this amendment added were **not engine work**:
 
 | | Work | Why it is not B |
 |---|---|---|
-| 1 | the stronger cap check — from every non-accepting state, reach an accepting or terminal state within `cap` (§9) | A graph property of a declaration. The engine never computes it |
+| 1 | the stronger cap check — from every subject (a state reachable from `initial` that is neither accepting nor terminal), reach an *accepting* state within `cap` (§9) | A graph property of a declaration. The engine never computes it |
 | 2 | moving prefix validation from `check_all` into `check_machine` (§11.7) | Pure checker tidying. Nothing in the engine reads a prefix |
 | 3 | typed header fields and guards, **and the checker's two-outcome abstraction of them** (§7, §9) | The abstraction is what keeps §9 decidable. It is a property of the checker, and the fields themselves are a **schema** change |
 
-**The recommendation is that these become a small cycle A.1, sequenced ahead of B, rather
-than being absorbed into B.** The argument turns on one thing, and it is item 3:
+**The recommendation was that these become a small cycle A.1, sequenced ahead of B, rather
+than being absorbed into B — and that is what happened.** The argument turned on one thing,
+and it is item 3:
 
 > **Item 3 changes the schema, and B's entire charter is "needs A's schema".** A plan for the
 > engine written against a schema that the same cycle is still amending has no fixed input.
@@ -1178,16 +1267,26 @@ in C (see the table above), and §9's effect-against-transport check lands when 
 would also **not** settle §11.10's second bound: the proposal there is a redefinition of what
 the cap counts, which depends on §8's classification landing first.
 
-**The three shipped defects in §9** — prefix validation's home, the collision skip keyed on
-`name` alone, and unbound `roles` values — are the natural contents of A.1 alongside items 1
-and 2, for the same reason: they are checker bugs, and B's verification should not be the
-place they get fixed.
+**Of the three shipped defects in §9, A.1 delivered one.** Prefix validation's home moved
+into `check_machine` (§11.7). The collision skip keyed on `name` alone, and unbound `roles`
+values, were proposed here as natural contents of A.1 alongside items 1 and 2, for the same
+reason — they are checker bugs, and B's verification should not be the place they get fixed —
+**but A.1's ten tasks did not include them; both are still open.** Whoever picks them up next
+should still do it as the same kind of small checker fix, not fold it into B's verification.
 
-**If the author prefers not to add a cycle**, the fallback that preserves the argument is to
-**land item 3's schema change as the first, separately verified half of B**, and to accept
-that B's plan cannot be written until that half is done. That is a cycle A.1 with a different
-name, and the reason to prefer the name is that §13 already promises each cycle its own plan
-and its own verification.
+**The fallback this proposal offered, not taken:** if the author had preferred not to add a
+cycle, the alternative that preserved the argument was to **land item 3's schema change as
+the first, separately verified half of B**, and accept that B's plan could not be written
+until that half was done — a cycle A.1 with a different name, kept distinct from B because
+§13 already promises each cycle its own plan and its own verification. The author chose the
+named cycle instead.
+
+**What B inherits.** A.1 leaves cycle B a schema that no longer moves under it: typed header
+fields (`int`, `bool`), registers (`max`, `last`), guards (`eq`, `ne`, `lt`, `le`, `gt`,
+`ge`) and their determinism rule, and a cap that is scoped (`channel` or `role`) and checked
+from every subject against the accepting states. B's job stays what §13's table above says —
+fold, verdict, outbound gate, guard evaluation, the clock, the order verdict, and the rule
+that the engine never branches on a world read — against that fixed input, not a moving one.
 
 ## 14. Non-goals
 
