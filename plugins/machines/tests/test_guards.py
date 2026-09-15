@@ -70,12 +70,25 @@ transitions:
 
 
 def splice_guarded(old, new):
-    # Assert the splice landed -- the same discipline `test_machine.py`'s
-    # `mutate()` applies to `VALID` (see tests/test_machine.py:7-15). A
+    # Assert the splice landed on exactly the text intended -- the same
+    # discipline `test_machine.py`'s `mutate()` applies to `VALID` (see
+    # tests/test_machine.py:7-15), strengthened one step further. A
     # `str.replace` whose `old` no longer occurs in `GUARDED` returns it
-    # unchanged, so a test that only inspects the parse result would go on
-    # checking the unmodified declaration and pass while testing nothing.
-    assert old in GUARDED, "splice_guarded(%r, ...) matched nothing in GUARDED" % old
+    # unchanged, so a test that only inspects the parse result would go
+    # on checking the unmodified declaration and pass while testing
+    # nothing -- that is what `old in GUARDED` alone catches. But `old`
+    # occurring *more than once* is its own silent failure: `str.replace`
+    # rewrites every occurrence, so a caller who means to touch one
+    # register's `field: ballot` and forgets that `GUARDED`'s prose above
+    # the fence also says "declared header field" would splice text the
+    # test never meant to touch, with no error anywhere -- a defect this
+    # module's own history has already produced once. Counting `old`'s
+    # occurrences and requiring exactly one closes that gap for every
+    # caller, not just the one that tripped over it.
+    count = GUARDED.count(old)
+    assert count == 1, (
+        "splice_guarded(%r, ...) matched %d times in GUARDED, not exactly "
+        "once -- pick a more specific target" % (old, count))
     return GUARDED.replace(old, new)
 
 
@@ -129,11 +142,12 @@ class TestRegisters(unittest.TestCase):
         self.assertEqual(r.initial, 0)
 
     def test_an_unknown_fold_is_rejected(self):
-        # `count` doesn't read the field it is declared against at all --
-        # a register's `field` names what it folds, and a count folds the
-        # presence of a matching message, not any value the message
-        # carries. Naming a `field` on a count would be a key the fold
-        # never consults.
+        # `count` is the fold that invites "how many promises have I
+        # collected" -- which is quorum, which is aggregation over a set
+        # of messages, which the spec forbids a register from expressing.
+        # Refusing it here costs nothing and removes the temptation to
+        # reach for it as the readable-looking way to smuggle quorum
+        # counting past that restriction one message at a time.
         #
         # `argmax` needs a second remembered value (which message, or
         # which of its other fields, produced the maximum) alongside the
@@ -191,7 +205,11 @@ class TestRegisters(unittest.TestCase):
             any("highest_promised" in p for p in problems), problems)
 
     def test_a_register_sharing_a_name_with_a_field_is_reported(self):
-        m = parse(splice_guarded("highest_promised", "ballot"))
+        # `highest_promised` occurs twice in GUARDED -- once in the prose
+        # above the fence, once as the registers key -- so `old` has to
+        # be the unique `registers:` line itself, not the bare name.
+        m = parse(splice_guarded(
+            "registers:\n  highest_promised:", "registers:\n  ballot:"))
         problems = check_machine(m)
         self.assertTrue(
             any("ballot" in p and "field" in p for p in problems), problems)

@@ -290,14 +290,20 @@ stays closed to what has an actual protocol behind it (`highest_promised`, track
 is the paxos-acceptor fixture's own register) rather than growing speculatively ahead of a
 concrete use — the same restraint that kept `string` out of `fields`'s type vocabulary.
 
-**`count` and `sum`** are excluded for a sharper reason: both would break the type-preservation
-property above. `count` doesn't read the field's value at all — it folds the presence of a
-matching message, not anything the message carries — so declaring a `field` against it would
-name a key the fold never consults. `sum` folds arithmetically without regard to the field's
-type, and a running sum of a `bool` field is not itself a `bool` (`True + True` is `2`, an
-`int`) — exactly the type mismatch `check_machine`'s `initial`-versus-field check exists to
-catch, except this time the mismatch would appear only after the fold had run, where nothing
-here can catch it at parse time or at check time either.
+**`count` is excluded on purpose, and not for a shape reason.** A count is the fold that
+invites "how many promises have I collected" — which is quorum, which is aggregation over a
+set of messages, which the spec forbids a register from expressing: a register remembers one
+scalar from one field, not a tally over who has responded. Refusing `count` costs this schema
+nothing (no protocol in this cycle needs it) and removes the temptation to reach for it as
+the readable-looking way to smuggle quorum counting past that restriction one message at a
+time.
+
+**`sum`** is excluded for a different, sharper reason: it would break the type-preservation
+property above. `sum` folds arithmetically without regard to the field's type, and a running
+sum of a `bool` field is not itself a `bool` (`True + True` is `2`, an `int`) — exactly the
+type mismatch `check_machine`'s `initial`-versus-field check exists to catch, except this
+time the mismatch would appear only after the fold had run, where nothing here can catch it
+at parse time or at check time either.
 
 ### The fold/argmax boundary
 
@@ -307,8 +313,26 @@ maximum" is a second value remembered alongside the scalar — which message, or
 other fields, broke the tie — and that second value is not in general an `int` or a `bool`
 either. Admitting `argmax` means admitting a second remembered value and a second type for it,
 which is a larger feature than one more string in a tuple, and it should be designed on
-purpose rather than backed into. `plugins/machines/lib/machines/machine.py`'s `check_machine`
-carries this same reasoning next to the R1-R4 checks, for a reader who gets there first.
+purpose rather than backed into.
+
+**A third property, worth stating on its own rather than leaving it implied by the first
+two:** `FIELD_TYPES` is closed to `int` and `bool`, so there is nothing a register could ever
+hold that is a *payload* — only a value a guard can order or test for equality. Paxos's own
+next step needs exactly a payload: once a proposer holds a quorum's worth of promises, it
+must propose the *value* one of them already carried, not just the ballot that won. That
+value is content, and content has no declarable field to carry it in — so no fold over this
+schema's fields, `max`, `last`, or a future `argmax`, can ever be the register that remembers
+it.
+
+Nor can two registers forge it. `highest_ballot: max(ballot)` alongside `chosen: last(value)`
+looks like it tracks both halves, but `value` is content with no field to name it in the
+first place, and even granting one, `last` remembers the *most recent* reading, not the one
+paired with the maximum — the two folds run independently and go out of step on the first
+message that arrives out of order. The forgery is not merely outside the vocabulary; it
+computes the wrong answer, silently, the first time it matters.
+
+`plugins/machines/lib/machines/machine.py`'s `check_machine` carries this same reasoning,
+written to stand on its own, next to the R1-R4 checks — for a reader who gets there first.
 
 ## `cap`
 

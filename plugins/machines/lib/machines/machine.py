@@ -446,6 +446,25 @@ def check_machine(m):
     # over the one scalar this schema declares. `FOLDS` stays closed to
     # `max` and `last` until that is designed on purpose, not backed into
     # by one more string in a tuple.
+    #
+    # A third property, easy to read past: `FIELD_TYPES` is closed to
+    # `int` and `bool`, so there is nothing a register could ever hold
+    # that is a *payload* -- only a value a guard can order or test for
+    # equality. Paxos's own next step needs exactly a payload: once a
+    # proposer holds a quorum's worth of promises, it must propose the
+    # *value* one of them already carried, not just the ballot that won.
+    # That value is content, and content has no declarable field to carry
+    # it in -- so no fold over this schema's fields, `max`, `last`, or a
+    # future `argmax`, can ever be the register that remembers it.
+    #
+    # Nor can two registers forge it. `highest_ballot: max(ballot)`
+    # alongside `chosen: last(value)` looks like it tracks both halves,
+    # but `value` is content with no field to name it in the first place,
+    # and even granting one, `last` remembers the *most recent* reading,
+    # not the one paired with the maximum -- the two folds run
+    # independently and go out of step on the first message that arrives
+    # out of order. The forgery is not merely outside the vocabulary; it
+    # computes the wrong answer, silently, the first time it matters.
     for name in sorted(m.registers):
         r = m.registers[name]
         field_declared = r.field in m.fields

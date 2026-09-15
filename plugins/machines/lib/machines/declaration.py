@@ -151,8 +151,8 @@ def _fields_section(data):
     and nothing later depends on another field's value.
 
     Absent or empty means no fields declared, and the result is `{}`, not
-    `None` -- a caller (cycle B's engine, and Task 4's `registers`, which
-    will reference a field by name) never has to check for the
+    `None` -- a caller (cycle B's engine, and `_registers_section` below,
+    which references a field by name) never has to check for the
     difference.
 
     A mapping, not a list of `{name, type}` objects: a list would be a
