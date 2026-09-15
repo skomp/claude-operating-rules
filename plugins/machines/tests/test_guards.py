@@ -227,8 +227,17 @@ class TestRegisters(unittest.TestCase):
         text = _splice_once(text, "fold: max, field: ballot", "fold: max, field: blocking")
         m = parse(text)
         problems = check_machine(m)
+        # Not just `any("highest_promised" in p for p in problems)`: once
+        # the register's field is `blocking` (bool), all four guards --
+        # which still compare a `ballot` (int) field against this register
+        # -- also trip G4, each message naming `highest_promised` too.
+        # Naming "initial" as well pins this assertion to R3, the problem
+        # this test is actually about; deleting R3 from `check_machine`
+        # would leave the untightened assertion green on G4 messages
+        # alone.
         self.assertTrue(
-            any("highest_promised" in p for p in problems), problems)
+            any("highest_promised" in p and "initial" in p for p in problems),
+            problems)
 
     def test_a_register_sharing_a_name_with_a_field_is_reported(self):
         # `highest_promised` occurs many times in GUARDED now that guards
@@ -265,17 +274,20 @@ class TestGuards(unittest.TestCase):
 
     def test_an_unknown_operator_is_rejected_by_name(self):
         # Measured against the shipped `MachineSafeLoader`: in block
-        # context -- the style every other shipped fixture uses -- an
-        # unquoted `op: >` parses to the empty string with no error
-        # raised anywhere, because `>` is YAML's block-scalar indicator,
-        # not a comparison symbol reaching this check; `op: !=` instead
-        # fails with a YAML error about a tag (`!`), not a named field.
-        # Neither reaches `_guard_field`'s `op not in OP_ATOMS` check as
-        # the string a publisher meant. Quoting each candidate below is
-        # what makes it arrive as the plain string it looks like, so the
-        # test is actually exercising this module's rejection rather than
-        # YAML's -- which is the whole reason the operator vocabulary is
-        # spelled out as words instead of symbols.
+        # context, an unquoted `op: >` parses to the empty string with no
+        # error raised anywhere, because `>` is YAML's block-scalar
+        # indicator, not a comparison symbol reaching this check.
+        # `GUARDED`'s own guard mappings are flow-style (`{ field: ...,
+        # op: ..., register: ... }`), where an unquoted `op: >` instead
+        # raises a YAML `ScannerError` immediately -- a different, but
+        # still wrong, failure mode; `op: !=` fails with a YAML error
+        # about a tag (`!`) in either style. None of that reaches
+        # `_guard_field`'s `op not in OP_ATOMS` check as the string a
+        # publisher meant. Quoting each candidate below is what makes it
+        # arrive as the plain string it looks like, so the test is
+        # actually exercising this module's rejection rather than YAML's
+        # -- which is the whole reason the operator vocabulary is spelled
+        # out as words instead of symbols.
         for bad in (">", ">=", "gte", "equals"):
             with self.subTest(bad=bad):
                 with self.assertRaises(DeclarationError) as ctx:

@@ -570,7 +570,14 @@ def check_machine(m):
         g = t.guard
         if g is None:
             continue
-        where = "guard on transition from %r on %r by %r" % (t.frm, t.on, t.by)
+        # Identified by all four of (frm, on, by, to), not just the first
+        # three: two transitions sharing (frm, on, by) but landing in
+        # different states is exactly the case a guard exists to
+        # disambiguate, so a guard message that dropped `to` would make
+        # two distinct guards on that pair produce byte-identical
+        # problems -- silently losing one report to any caller that
+        # de-duplicates, on the declaration's own motivating case.
+        where = "guard on transition from %r on %r by %r to %r" % (t.frm, t.on, t.by, t.to)
         field_declared = g.field in m.fields
         if not field_declared:                                        # G1
             problems.append("%s names undeclared field %r" % (where, g.field))

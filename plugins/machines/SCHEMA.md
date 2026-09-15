@@ -218,7 +218,8 @@ without a publisher hand-rolling that bookkeeping in prose nobody checks.
 **A register is a declaration of how a scalar would be folded, not the fold itself.** Nothing
 in this document, or in cycle A's checker, evaluates a guard, folds a trace, or reads a
 channel — that is cycle B's engine. `check_machine` only checks that a register's declaration
-is internally consistent with the rest of the machine; see the four checks below.
+is internally consistent with the rest of the machine — see the checks below, and the one
+just past them that needs a guard to exist first.
 
 Each register is a mapping with exactly these four keys, all required:
 
@@ -513,7 +514,7 @@ Each entry is a transition, with these fields:
   keeps the declaration inert data rather than a program: an unvalidated effect such as
   `run:curl ...` would be an instruction, and an engine that later grew to honour it would be
   executing a stranger's command.
-- **`guard`** (mapping, optional) — a condition on whether this transition fires: one
+- **`guard`** (mapping, optional) — a restriction on whether this transition fires: one
   declared header field, compared to one declared register's remembered value, by one
   operator. Exactly three keys, all required, no others tolerated:
 
@@ -563,9 +564,9 @@ Each entry is a transition, with these fields:
   outcomes that make it true. `eq` and `ne` are meaningful on a `bool` field (there are only
   two values, so equal-or-not is all there is to ask); `lt`/`le`/`gt`/`ge` are not (G3).
 
-  **Two engine semantics this schema pins even though nothing in this cycle evaluates a
-  guard**, so that the engine which does is working from one fixed answer rather than
-  inventing it at that point:
+  **Two engine semantics cycle B implements and this schema pins in advance**, even though
+  nothing in cycle A evaluates a guard, so that cycle B is working from one fixed answer
+  rather than inventing it at that point:
 
   1. A guard is evaluated against the register's value *before* the arriving message is
      folded into it. Otherwise a guard comparing a field against the very register that
