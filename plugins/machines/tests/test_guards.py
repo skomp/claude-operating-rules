@@ -69,14 +69,14 @@ transitions:
 """
 
 
-def splice_guarded(old, new):
+def _splice_once(text, old, new):
     # Assert the splice landed on exactly the text intended -- the same
     # discipline `test_machine.py`'s `mutate()` applies to `VALID` (see
     # tests/test_machine.py:7-15), strengthened one step further. A
-    # `str.replace` whose `old` no longer occurs in `GUARDED` returns it
+    # `str.replace` whose `old` no longer occurs in `text` returns it
     # unchanged, so a test that only inspects the parse result would go
     # on checking the unmodified declaration and pass while testing
-    # nothing -- that is what `old in GUARDED` alone catches. But `old`
+    # nothing -- that is what `old in text` alone catches. But `old`
     # occurring *more than once* is its own silent failure: `str.replace`
     # rewrites every occurrence, so a caller who means to touch one
     # register's `field: ballot` and forgets that `GUARDED`'s prose above
@@ -85,11 +85,24 @@ def splice_guarded(old, new):
     # module's own history has already produced once. Counting `old`'s
     # occurrences and requiring exactly one closes that gap for every
     # caller, not just the one that tripped over it.
-    count = GUARDED.count(old)
+    #
+    # Takes `text` rather than always reading `GUARDED` so a test that
+    # needs more than one substitution -- progressively mutating the same
+    # string -- can chain calls (splice `GUARDED` once, then splice the
+    # result again) and keep the same exactly-once guarantee at every
+    # step, instead of falling back to a raw, unguarded `str.replace`
+    # once the text in hand is no longer literally `GUARDED`.
+    # `splice_guarded`, below, is the common case (splicing `GUARDED`
+    # itself) built on top of this.
+    count = text.count(old)
     assert count == 1, (
-        "splice_guarded(%r, ...) matched %d times in GUARDED, not exactly "
-        "once -- pick a more specific target" % (old, count))
-    return GUARDED.replace(old, new)
+        "splice(%r, ...) matched %d times, not exactly once -- pick a "
+        "more specific target" % (old, count))
+    return text.replace(old, new)
+
+
+def splice_guarded(old, new):
+    return _splice_once(GUARDED, old, new)
 
 
 class TestFields(unittest.TestCase):
@@ -187,18 +200,16 @@ class TestRegisters(unittest.TestCase):
             any("highest_promised" in p for p in problems), problems)
 
     def test_an_int_initial_on_a_bool_field_is_reported(self):
-        # Two splices: add a bool field, then point the register at it,
-        # leaving `initial: 0` (an int) untouched. Same fail-loudly
-        # discipline as `splice_guarded`, applied twice by hand since a
-        # single `splice_guarded` call only carries one substitution.
-        text = GUARDED
-        assert "fields:\n  ballot: int" in text, \
-            "fixture drifted: 'fields:\\n  ballot: int' not found"
-        text = text.replace(
-            "fields:\n  ballot: int", "fields:\n  ballot: int\n  blocking: bool")
-        assert "field: ballot" in text, \
-            "fixture drifted: 'field: ballot' not found"
-        text = text.replace("field: ballot", "field: blocking")
+        # Two splices, chained: add a bool field, then point the register
+        # at it, leaving `initial: 0` (an int) untouched. Both go through
+        # `_splice_once`, so each carries the same exactly-once guarantee
+        # `splice_guarded` gives `GUARDED` itself -- there is no raw,
+        # unguarded `str.replace` against `GUARDED` or text derived from
+        # it anywhere in this file.
+        text = _splice_once(
+            GUARDED, "fields:\n  ballot: int",
+            "fields:\n  ballot: int\n  blocking: bool")
+        text = _splice_once(text, "field: ballot", "field: blocking")
         m = parse(text)
         problems = check_machine(m)
         self.assertTrue(
