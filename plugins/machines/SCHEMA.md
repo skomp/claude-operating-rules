@@ -193,6 +193,15 @@ which the spec forbids outright. A machine's own field named `clock`, with no do
 perfectly ordinary field and has nothing to do with the envelope's clock; the two coexist
 because the envelope's is always dotted and a declared field's is never allowed to be.
 
+**The envelope's clock is not a field, and cannot be guarded, on purpose.** `envelope.clock`
+never reaches `fields` at all — a name may never contain `.`, so there is no spelling in this
+language through which a publisher could declare it, and therefore no spelling through which
+a `guard` (below, under `` `transitions` ``) could compare against it either. §7 is why: the
+clock orders delivery, it is not protocol content, and a guard that could see it would let a
+machine's behaviour depend on something no peer's message actually carries. The restriction
+is enforced by there being no syntax for it, not by a check that would have to catch it after
+the fact.
+
 **A mapping, not a list of `{name, type}` objects.** A list would be a third entry shape to
 validate for no gain over what a mapping already expresses, and — the reason that matters
 more — a mapping cannot carry a duplicate field name at all; there is nothing to catch
@@ -567,6 +576,18 @@ A non-accepting state whose every future ends in a terminal non-accepting state 
 branch, "once the versions are incompatible, every route aborts" — is accepted. It is a true
 thing to declare, there is no field with which an author could confirm they meant it, and an
 unsuppressible complaint about a valid machine would be worse than a missing one.
+
+**`accepting` is a declared assertion, not a derived one, and that limit is permanent.** A
+publisher writes `accepting: true` because nothing is owed to anybody in that state — a claim
+about what the protocol *means*, not about its shape. `check_machine` checks the structural
+properties that surround the claim (that at least one state carries it, that every state can
+reach one that does) but never checks the claim itself: nothing here can confirm that a state
+a publisher marked accepting really is a fine place for a run to stop, any more than it could
+catch the reverse — a state marked accepting where something is, in fact, still owed. That is
+not a gap a later cycle closes. "Nothing further is required" is a fact about the protocol's
+meaning, which lives with the person who wrote the declaration, not in its shape, so no
+structural checker — this one or any future one — can ever verify it from the declaration
+alone. Trusting `accepting` means trusting whoever wrote it.
 
 ## `states`
 

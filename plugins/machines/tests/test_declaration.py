@@ -221,10 +221,10 @@ class TestParse(unittest.TestCase):
                 self.assertEqual(ctx.exception.field, "cap")
 
     def test_fields_is_accepted_but_not_required(self):
-        # `fields` (and `registers` alongside it) was added to FIELDS in
-        # Task 3. VALID carries neither, and has always parsed -- assert
-        # that on purpose, rather than let the suite stay green by
-        # accident if a future change made either required.
+        # `fields` and `registers` are both optional top-level fields.
+        # VALID carries neither, and has always parsed -- assert that on
+        # purpose, rather than let the suite stay green by accident if a
+        # future change made either required.
         self.assertIn("fields", FIELDS)
         self.assertIn("registers", FIELDS)
         # The full value, not just two memberships: a membership check

@@ -242,6 +242,26 @@ class TestCli(unittest.TestCase):
                 code = main([path])
         self.assertEqual(code, 0, out.getvalue())
 
+    # --- the cycle's worked guarded example, end to end through the
+    # shipped CLI: the fixture-loading path, the collision check and the
+    # CLI itself had not seen a guarded declaration until this task.
+
+    def test_the_paxos_fixture_is_well_formed_end_to_end(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = main([str(FIXTURES / "valid-paxos-acceptor.md")])
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertIn("Examined 1 machine", out.getvalue())
+
+    def test_the_two_fixtures_do_not_collide(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = main([str(FIXTURES / "valid-session-relay.md"),
+                         str(FIXTURES / "valid-paxos-acceptor.md")])
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertIn("Examined 2 machines", out.getvalue())
+        self.assertIn("No collisions found", out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
