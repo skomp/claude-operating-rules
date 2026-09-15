@@ -88,6 +88,55 @@ class Register(object):
         self.initial = initial
 
 
+# A guard's operator vocabulary, spelled as words rather than symbols --
+# see declaration.py's `_guard_field` for the measurement that makes a
+# symbol form actively unsafe, not merely a style choice.
+#
+# `LT`, `EQ`, `GT` are the three possible outcomes of comparing two values
+# of a totally ordered type -- there are no others. Every operator below
+# is the union of the outcomes that make it true: `eq` accepts only `EQ`,
+# `ne` accepts everything that is not `EQ`, and the four ordering
+# operators each accept one or two of the three. This table is what makes
+# a guard's truth decidable from which atom a comparison produced,
+# without a check ever interpreting the compared values themselves --
+# it only has to know which of `LT`/`EQ`/`GT` two values produced, once,
+# and this table answers every operator from that one fact.
+OP_ATOMS = {
+    "eq": frozenset(["EQ"]),
+    "ne": frozenset(["LT", "GT"]),
+    "lt": frozenset(["LT"]),
+    "le": frozenset(["LT", "EQ"]),
+    "gt": frozenset(["GT"]),
+    "ge": frozenset(["EQ", "GT"]),
+}
+
+# The operators that require an ordering, not merely an equality test.
+# `eq`/`ne` are meaningful on any totally ordered type, `bool` included
+# (there are only two values, so equal-or-not is all there is to ask);
+# the four here ask "which is bigger", which a `bool` field has no
+# declared meaning for. See G3 in `check_machine`.
+ORDERING_OPS = ("lt", "le", "gt", "ge")
+
+
+class Guard(object):
+    """A transition's guard: one declared field compared to one declared
+    register's remembered value, by one operator.
+
+    `field` names a declared header field (see `Field`, above); `register`
+    names a declared `Register`; `op` is one of `OP_ATOMS`'s six keys.
+
+    This class only declares the comparison. Nothing in cycle A evaluates
+    one -- comparing a guard against an arriving message and a register's
+    current value, and deciding whether the transition fires, is cycle
+    B's engine, the same boundary `Register`'s docstring draws for a fold.
+    """
+
+    def __init__(self, field, op, register):
+        self.field = field
+        self.op = op
+        self.register = register
+
+
 class State(object):
     """A state, with two independent properties that are easy to conflate.
 
@@ -118,13 +167,18 @@ class State(object):
 
 
 class Transition(object):
-    def __init__(self, frm, on, by, to, signal=False, effects=None):
+    def __init__(self, frm, on, by, to, signal=False, effects=None, guard=None):
         self.frm = frm
         self.on = on
         self.by = by
         self.to = to
         self.signal = signal
         self.effects = list(effects or [])
+        # `Guard` or `None`. `None` means this transition fires
+        # unconditionally -- there is no empty `Guard` standing in for
+        # "no guard", the same reasoning `Register`'s absence-is-`None`
+        # comment gives for `fields`/`registers` on `Machine`.
+        self.guard = guard
 
 
 class Machine(object):
@@ -488,6 +542,66 @@ def check_machine(m):
             problems.append(
                 "register %r shares its name with a declared field"
                 % (name,))
+
+    # Guards: G1-G5. `declaration.parse` already enforced everything about
+    # a guard's own shape (a mapping, exactly the three keys
+    # `field`/`op`/`register`, each a string, `op` in `OP_ATOMS`); what is
+    # left is cross-referencing a guard's `field` and `register` against
+    # `fields` and `registers`, both declared elsewhere in the same
+    # document, the same split the R1-R4 comment above draws for a
+    # register's own `field` and `on`.
+    #
+    # G3 and G4 are both skipped when a name they would need is itself
+    # undeclared -- G1/G2 already fired for that name, or (G4 only) the
+    # register's own `field` is undeclared and R1 already fired for it --
+    # the same reason R3 above is skipped for a register whose `field` is
+    # undeclared: there is no field type left to compare against.
+    #
+    # One check named in the design this schema follows has no code here
+    # on purpose: that the value a guard compares against is derivable
+    # from the trace and nowhere else. It is enforced by construction, not
+    # by a check that could fail -- a register's only source is a `fold`
+    # over a `field` of messages of declared `kinds` (see `Register`,
+    # above), and there is no syntax anywhere in this schema for a
+    # register to come from anything else. A check here would have
+    # nothing to reject.
+    guarded_registers = set()
+    for t in m.transitions:
+        g = t.guard
+        if g is None:
+            continue
+        where = "guard on transition from %r on %r by %r" % (t.frm, t.on, t.by)
+        field_declared = g.field in m.fields
+        if not field_declared:                                        # G1
+            problems.append("%s names undeclared field %r" % (where, g.field))
+        register_declared = g.register in m.registers
+        if not register_declared:                                     # G2
+            problems.append("%s names undeclared register %r" % (where, g.register))
+        else:
+            guarded_registers.add(g.register)
+        if field_declared and g.op in ORDERING_OPS:                    # G3
+            field_type = m.fields[g.field].type
+            if field_type != "int":
+                problems.append(
+                    "%s uses ordering operator %r on field %r, which is "
+                    "declared %s, not int -- ordering has no meaning the "
+                    "engine could implement for a non-int field"
+                    % (where, g.op, g.field, field_type))
+        if field_declared and register_declared:                       # G4
+            register_field = m.registers[g.register].field
+            if register_field in m.fields:
+                field_type = m.fields[g.field].type
+                register_field_type = m.fields[register_field].type
+                if field_type != register_field_type:
+                    problems.append(
+                        "%s compares field %r (%s) against register %r "
+                        "(%s)" % (where, g.field, field_type, g.register,
+                                 register_field_type))
+
+    for name in sorted(m.registers):                                   # G5
+        if name not in guarded_registers:
+            problems.append(
+                "register %r is declared but no guard names it" % (name,))
 
     # The reachability and cap checks both need a declared `initial` to
     # mean anything: with an undeclared initial state, forward-flooding

@@ -2,13 +2,15 @@ import re
 import yaml
 from .errors import DeclarationError
 from .machine import (FIELDS, REQUIRED, Machine, State, Transition, Field,
-                       FIELD_TYPES, NAME, _MAX_PREFIX_LENGTH, Register, FOLDS)
+                       FIELD_TYPES, NAME, _MAX_PREFIX_LENGTH, Register, FOLDS,
+                       Guard, OP_ATOMS)
 
 _FENCE = re.compile(r"^```machine[ \t]*\n(.*?)^```[ \t]*$", re.MULTILINE | re.DOTALL)
 
 _STATE_KEYS = {"name", "holder", "terminal", "accepting"}
-_TRANSITION_KEYS = {"from", "on", "by", "to", "signal", "effects"}
+_TRANSITION_KEYS = {"from", "on", "by", "to", "signal", "effects", "guard"}
 _REGISTER_KEYS = {"fold", "field", "on", "initial"}
+_GUARD_KEYS = {"field", "op", "register"}
 
 
 class MachineSafeLoader(yaml.SafeLoader):
@@ -135,6 +137,7 @@ def parse(text):
         transitions.append(Transition(
             field["from"], field["on"], field["by"], field["to"],
             _bool_field(raw, "signal", False), _effects_field(raw),
+            _guard_field(raw),
         ))
 
     return Machine(
@@ -358,6 +361,49 @@ def _effects_field(raw):
     for effect in effects:
         _require_string(effect, "effects", "each entry of ")
     return effects
+
+def _guard_field(raw):
+    """A transition's optional `guard`: a mapping with exactly the three
+    keys `field`, `op`, `register` -- all required, none else tolerated,
+    each a string, `op` one of `OP_ATOMS`'s six words. Entirely shape
+    validation here -- whether `field` and `register` actually name a
+    declared field and a declared register is a cross-reference
+    `check_machine` makes (G1, G2), the same split `_fields_section` and
+    `_registers_section` document above for their own contents.
+
+    Absent means the transition fires unconditionally, and the result is
+    `None`, not a `Guard` with empty fields -- the same reasoning
+    `_fields_section` gives for returning `{}` rather than `None`, read in
+    the other direction: here, nothing declared means nothing to compare.
+
+    `op` must be spelled as a word, never a symbol. Loaded through the
+    shipped `MachineSafeLoader`, an unquoted `op: >` in block context
+    parses to the empty string with no error raised anywhere -- `>` is
+    YAML's block-scalar indicator, not a comparison operator reaching this
+    function -- and `op: !=` fails with a YAML error about a tag instead
+    of a named field. Neither is the failure a publisher who tried a
+    symbol should get; requiring one of `OP_ATOMS`'s words sidesteps both
+    by construction, rather than trying to detect the symbol forms after
+    the fact.
+    """
+    if "guard" not in raw:
+        return None
+    spec = raw["guard"]
+    _require_mapping(spec, "guard")
+    _reject_unknown(spec, _GUARD_KEYS, "guard")
+    field = _require_string(
+        _require_present(spec, "field", "guard"), "field", "a guard's ")
+    op = _require_string(
+        _require_present(spec, "op", "guard"), "op", "a guard's ")
+    if op not in OP_ATOMS:
+        raise DeclarationError(
+            "guard has op %r, which is not one of %s"
+            % (op, sorted(OP_ATOMS)), field="guard")
+    register = _require_string(
+        _require_present(spec, "register", "guard"), "register",
+        "a guard's ")
+    return Guard(field, op, register)
+
 
 def _bool_field(raw, key, default):
     # Narrowing MachineSafeLoader's bool resolution (above) stops YAML from

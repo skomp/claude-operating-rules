@@ -8,12 +8,12 @@ from tests.test_declaration import VALID  # the known-good declaration
 
 # `GUARDED` grows across three tasks of this cycle, the way `VALID`
 # (test_declaration.py) stays fixed but `test_machine.py`'s tests mutate
-# copies of it: Task 3 (this one) adds `fields`; Task 5 adds a `guard:`
-# mapping to two of the transitions below; Task 7 converts the bare
-# `cap: 6` to the mapping form. That growth is intentional, not drift --
-# each task's tests build on what the one before it left in place -- and
-# this is the same declaration `valid-paxos-acceptor.md` (a fixture Task 9
-# will create) carries.
+# copies of it: Task 3 added `fields`; Task 5 (this one) adds a `guard:`
+# mapping to four of the transitions below; Task 7 will convert the bare
+# `cap: 6` to the mapping form -- the only growth left. That growth is
+# intentional, not drift -- each task's tests build on what the one before
+# it left in place -- and this is the same declaration `valid-paxos-acceptor.md`
+# (a fixture Task 9 will create) carries.
 #
 # Two controller rulings shape the block exactly as written here:
 #
@@ -22,20 +22,23 @@ from tests.test_declaration import VALID  # the known-good declaration
 # the mapping form raises `DeclarationError` until Task 7 lands. Do not
 # write the mapping form before then.
 #
-# Ruling B -- no transition below carries `guard:`. Measured:
-# `declaration.py`'s `_TRANSITION_KEYS` does not include `"guard"`, so a
-# transition that carried one would raise `DeclarationError` by name until
-# Task 5 extends that set. Left unguarded, this declaration has two
-# genuinely nondeterministic groups (`idle` on `prepare` by `proposer`,
-# and `promised` on `accept-request` by `proposer`), which the shipped
-# determinism check in `check_machine` reports for both. No test in this
-# file asserts `check_machine(parse(GUARDED))` is empty -- Task 3's tests
-# are all parse-level.
+# Ruling B -- four of the seven transitions below now carry `guard:`.
+# Left unguarded, this declaration has two genuinely nondeterministic
+# groups (`idle` on `prepare` by `proposer`, and `promised` on
+# `accept-request` by `proposer`), which the shipped determinism check in
+# `check_machine` still reports for both -- a guard narrows *when* a
+# transition fires, and nothing in this cycle's determinism check reads a
+# guard to know that yet. Task 6 replaces that check with the rule that
+# makes a disjoint guarded branch legal;
+# `test_the_paxos_fixture_is_well_formed_apart_from_its_guarded_branches`,
+# below, filters those two reports out until then.
 GUARDED = """
 The paxos-acceptor protocol carries a single Paxos ballot number as a
 declared header field, and one register -- `highest_promised` -- that
-folds it by `max` over `prepare` messages. Nothing guards on it yet: no
-transition below carries a `guard:` mapping until Task 5 adds one.
+folds it by `max` over `prepare` messages. Four transitions below guard
+on it: a `prepare` is only a promise when its ballot beats the highest
+one already promised, and an `accept-request` is only honoured at the
+ballot the acceptor promised, never another.
 
 ```machine
 machine: paxos-acceptor
@@ -58,11 +61,15 @@ states:
   - { name: proposed, holder: acceptor }
   - { name: decided,  terminal: true, accepting: true }
 transitions:
-  - { from: idle, on: prepare, by: proposer, to: prepared, signal: true }
-  - { from: idle, on: prepare, by: proposer, to: idle, signal: true }
+  - { from: idle, on: prepare, by: proposer, to: prepared, signal: true,
+      guard: { field: ballot, op: gt, register: highest_promised } }
+  - { from: idle, on: prepare, by: proposer, to: idle, signal: true,
+      guard: { field: ballot, op: le, register: highest_promised } }
   - { from: prepared, on: promise, by: acceptor, to: promised, signal: true }
-  - { from: promised, on: accept-request, by: proposer, to: proposed, signal: true }
-  - { from: promised, on: accept-request, by: proposer, to: idle, signal: true }
+  - { from: promised, on: accept-request, by: proposer, to: proposed, signal: true,
+      guard: { field: ballot, op: eq, register: highest_promised } }
+  - { from: promised, on: accept-request, by: proposer, to: idle, signal: true,
+      guard: { field: ballot, op: ne, register: highest_promised } }
   - { from: proposed, on: accepted, by: acceptor, to: decided, signal: true }
   - { from: proposed, on: rejected, by: acceptor, to: idle, signal: true }
 ```
@@ -179,7 +186,12 @@ class TestRegisters(unittest.TestCase):
         self.assertEqual(ctx.exception.field, "registers")
 
     def test_a_register_on_an_undeclared_field_is_reported(self):
-        m = parse(splice_guarded("field: ballot", "field: nope"))
+        # `"field: ballot"` alone now occurs five times once guards exist
+        # (the register's own declaration plus four guards that also name
+        # `field: ballot`) -- `_splice_once` would refuse it. `"fold: max,
+        # field: ballot"` is the register's own declaration line and
+        # nowhere else, so it stays a single, specific target.
+        m = parse(splice_guarded("fold: max, field: ballot", "fold: max, field: nope"))
         problems = check_machine(m)
         self.assertTrue(
             any("highest_promised" in p and "nope" in p for p in problems),
@@ -206,24 +218,153 @@ class TestRegisters(unittest.TestCase):
         # `splice_guarded` gives `GUARDED` itself -- there is no raw,
         # unguarded `str.replace` against `GUARDED` or text derived from
         # it anywhere in this file.
+        # Same retargeting as test_a_register_on_an_undeclared_field_is_reported,
+        # and for the same reason: `"field: ballot"` alone is no longer
+        # unique once guards exist.
         text = _splice_once(
             GUARDED, "fields:\n  ballot: int",
             "fields:\n  ballot: int\n  blocking: bool")
-        text = _splice_once(text, "field: ballot", "field: blocking")
+        text = _splice_once(text, "fold: max, field: ballot", "fold: max, field: blocking")
         m = parse(text)
         problems = check_machine(m)
         self.assertTrue(
             any("highest_promised" in p for p in problems), problems)
 
     def test_a_register_sharing_a_name_with_a_field_is_reported(self):
-        # `highest_promised` occurs twice in GUARDED -- once in the prose
-        # above the fence, once as the registers key -- so `old` has to
-        # be the unique `registers:` line itself, not the bare name.
+        # `highest_promised` occurs many times in GUARDED now that guards
+        # exist -- the prose, the registers key, and every guard's
+        # `register: highest_promised` -- so `old` has to be the unique
+        # `registers:` line itself, not the bare name.
+        #
+        # This splice renames only the registers *key*, not the guards'
+        # `register:` references, so it also leaves every guard naming an
+        # undeclared register (G2) and the renamed register unguarded
+        # (G5) -- both real, both additional. The assertion below only
+        # asks whether the field-collision problem (R4) this test is
+        # actually about is among them, which it still is.
         m = parse(splice_guarded(
             "registers:\n  highest_promised:", "registers:\n  ballot:"))
         problems = check_machine(m)
         self.assertTrue(
             any("ballot" in p and "field" in p for p in problems), problems)
+
+
+class TestGuards(unittest.TestCase):
+    def test_a_guard_lands_on_the_transition(self):
+        m = parse(GUARDED)
+        t = next(t for t in m.transitions if t.frm == "idle" and t.to == "prepared")
+        self.assertEqual((t.guard.field, t.guard.op, t.guard.register),
+                         ("ballot", "gt", "highest_promised"))
+
+    def test_an_unguarded_transition_has_guard_none(self):
+        # `prepared` on `promise` is the one transition Ruling B left
+        # unguarded.
+        m = parse(GUARDED)
+        t = next(t for t in m.transitions if t.frm == "prepared" and t.to == "promised")
+        self.assertIsNone(t.guard)
+
+    def test_an_unknown_operator_is_rejected_by_name(self):
+        # Measured against the shipped `MachineSafeLoader`: in block
+        # context -- the style every other shipped fixture uses -- an
+        # unquoted `op: >` parses to the empty string with no error
+        # raised anywhere, because `>` is YAML's block-scalar indicator,
+        # not a comparison symbol reaching this check; `op: !=` instead
+        # fails with a YAML error about a tag (`!`), not a named field.
+        # Neither reaches `_guard_field`'s `op not in OP_ATOMS` check as
+        # the string a publisher meant. Quoting each candidate below is
+        # what makes it arrive as the plain string it looks like, so the
+        # test is actually exercising this module's rejection rather than
+        # YAML's -- which is the whole reason the operator vocabulary is
+        # spelled out as words instead of symbols.
+        for bad in (">", ">=", "gte", "equals"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(DeclarationError) as ctx:
+                    parse(splice_guarded("op: gt", 'op: "%s"' % bad))
+                self.assertEqual(ctx.exception.field, "guard")
+
+    def test_a_guard_on_an_undeclared_field_is_reported(self):
+        # "field: ballot, op: gt" (not the bare "field: ballot", which
+        # now matches five times) is the one guard using `gt`, so this
+        # touches only the `idle`-to-`prepared` guard.
+        m = parse(splice_guarded("field: ballot, op: gt", "field: nope, op: gt"))
+        problems = check_machine(m)
+        self.assertTrue(any("nope" in p for p in problems), problems)
+
+    def test_a_guard_against_an_undeclared_register_is_reported(self):
+        m = parse(splice_guarded(
+            "op: gt, register: highest_promised", "op: gt, register: nope"))
+        problems = check_machine(m)
+        self.assertTrue(any("nope" in p for p in problems), problems)
+
+    def test_an_ordering_operator_on_a_bool_field_is_reported(self):
+        text = _splice_once(
+            GUARDED, "fields:\n  ballot: int",
+            "fields:\n  ballot: int\n  blocking: bool")
+        # Retargets the `gt` guard's field to the new bool field, leaving
+        # its register (still folding an `int`) untouched -- this also
+        # trips G4 (field/register type mismatch), which is fine: the
+        # assertion below only asks for the ordering-specific problem.
+        text = _splice_once(text, "field: ballot, op: gt", "field: blocking, op: gt")
+        m = parse(text)
+        problems = check_machine(m)
+        self.assertTrue(any("ordering" in p for p in problems), problems)
+
+    def test_equality_on_a_bool_field_is_accepted(self):
+        text = _splice_once(
+            GUARDED, "fields:\n  ballot: int",
+            "fields:\n  ballot: int\n  blocking: bool")
+        text = _splice_once(
+            text,
+            "highest_promised: { fold: max, field: ballot, on: [prepare], initial: 0 }",
+            "highest_promised: { fold: max, field: ballot, on: [prepare], initial: 0 }\n"
+            "  blocking_last: { fold: last, field: blocking, on: [prepare], initial: false }")
+        # Retargets the `eq` guard (the only one) to the new bool field
+        # and its matching bool register, so this exercises equality on a
+        # bool with nothing else about the fixture disturbed.
+        text = _splice_once(
+            text, "field: ballot, op: eq, register: highest_promised",
+            "field: blocking, op: eq, register: blocking_last")
+        m = parse(text)
+        problems = check_machine(m)
+        self.assertFalse(any("blocking" in p for p in problems), problems)
+
+    def test_an_int_field_compared_to_a_bool_register_is_reported(self):
+        text = _splice_once(
+            GUARDED, "fields:\n  ballot: int",
+            "fields:\n  ballot: int\n  blocking: bool")
+        text = _splice_once(
+            text,
+            "highest_promised: { fold: max, field: ballot, on: [prepare], initial: 0 }",
+            "highest_promised: { fold: max, field: ballot, on: [prepare], initial: 0 }\n"
+            "  blocking_last: { fold: last, field: blocking, on: [prepare], initial: false }")
+        # Retargets the `ne` guard's *register* only, leaving its field
+        # `ballot` (int) untouched, so only G4 (not G3 -- `ne` is not an
+        # ordering operator) is exercised.
+        text = _splice_once(
+            text, "op: ne, register: highest_promised",
+            "op: ne, register: blocking_last")
+        m = parse(text)
+        problems = check_machine(m)
+        self.assertTrue(
+            any("blocking_last" in p and "bool" in p for p in problems), problems)
+
+    def test_a_register_no_guard_names_is_reported(self):
+        text = _splice_once(
+            GUARDED,
+            "highest_promised: { fold: max, field: ballot, on: [prepare], initial: 0 }",
+            "highest_promised: { fold: max, field: ballot, on: [prepare], initial: 0 }\n"
+            "  unused: { fold: last, field: ballot, on: [prepare], initial: 0 }")
+        m = parse(text)
+        problems = check_machine(m)
+        self.assertTrue(any("unused" in p for p in problems), problems)
+
+    def test_the_paxos_fixture_is_well_formed_apart_from_its_guarded_branches(self):
+        # The two guarded branches are still reported as nondeterministic here:
+        # Task 6 replaces the determinism check with the rule that makes a
+        # disjoint guarded branch legal, and tightens this assertion to the
+        # unfiltered equality.
+        self.assertEqual(
+            [p for p in check_machine(parse(GUARDED)) if "nondetermin" not in p], [])
 
 
 if __name__ == "__main__":

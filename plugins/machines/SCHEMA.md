@@ -172,9 +172,9 @@ declares no header fields, and `check_machine` has nothing to say about it eithe
 `fields` is entirely parse-time; there is no cross-reference to make.
 
 A field is a named, typed position in a message header: a value a peer's message carries
-that a later cycle's guard compares against, and that a register (a later cycle) can fold
-over a trace of. This document only declares the shape; nothing here evaluates a guard,
-folds a trace, or reads a channel — that is cycle B's engine, not this parser.
+that a guard (below, under `` `transitions` ``) compares against, and that a register can
+fold over a trace of. This document only declares the shape; nothing here evaluates a
+guard, folds a trace, or reads a channel — that is cycle B's engine, not this parser.
 
 **There are exactly two types: `int` and `bool`.** Closed on purpose, so a publisher who
 writes `ballot: integer` or `ballot: number` is told the word is wrong by name, rather than
@@ -210,10 +210,10 @@ fields:
 means this machine remembers nothing across the trace.
 
 A register is one remembered scalar: a value folded from every message of the right kind
-that has arrived so far, seeded at a stated starting value. It exists so that a guard (a
-later cycle) can compare a field on the message just arrived against something the protocol
-has already seen — the highest ballot promised so far, say — without a publisher hand-rolling
-that bookkeeping in prose nobody checks.
+that has arrived so far, seeded at a stated starting value. It exists so that a guard
+(below, under `` `transitions` ``) can compare a field on the message just arrived against
+something the protocol has already seen — the highest ballot promised so far, say —
+without a publisher hand-rolling that bookkeeping in prose nobody checks.
 
 **A register is a declaration of how a scalar would be folded, not the fold itself.** Nothing
 in this document, or in cycle A's checker, evaluates a guard, folds a trace, or reads a
@@ -238,8 +238,11 @@ Each register is a mapping with exactly these four keys, all required:
   `bool`) — a register that starts life as a value the comparison cannot order would
   otherwise reach a guard as a type error with nothing in the declaration to point at.
 
-A fifth check, not yet shippable: a register no guard names anywhere is reported. It cannot
-be written until guards exist.
+**A fifth check:** a declared register that no guard names anywhere is reported. See the
+`guard` bullet under `` `transitions` ``, below, for what a guard is, and for why an unread
+register — unlike an unread field — is reported at all: a register has exactly one possible
+consumer, a guard, so one no guard names is dead weight; a field can still be carried in
+the header for the participant to read, so the same check does not exist for a field.
 
 **A register's name must not also be a declared field's name.** The two live in the same
 namespace (`NAME`, the pattern `fields` uses too — see that section), and a guard compares
@@ -510,6 +513,75 @@ Each entry is a transition, with these fields:
   keeps the declaration inert data rather than a program: an unvalidated effect such as
   `run:curl ...` would be an instruction, and an engine that later grew to honour it would be
   executing a stranger's command.
+- **`guard`** (mapping, optional) — a condition on whether this transition fires: one
+  declared header field, compared to one declared register's remembered value, by one
+  operator. Exactly three keys, all required, no others tolerated:
 
-Any field on a transition entry other than `from`, `on`, `by`, `to`, `signal` and `effects`
-is rejected by name.
+  ```yaml
+  guard: { field: ballot, op: gt, register: highest_promised }
+  ```
+
+  A guard narrows *when* a transition fires, but does not — in this cycle — change the
+  determinism check above: two guarded transitions sharing `from`, `on` and `by` are still
+  reported, even where their guards can never both be true for the same arriving message.
+
+  `check_machine` cross-references a guard's `field` and `register` against `fields` and
+  `registers`, and checks that the comparison it declares is type-sound:
+
+  - **G1** — `field` must name a declared field.
+  - **G2** — `register` must name a declared register.
+  - **G3** — an ordering operator (`lt`, `le`, `gt`, `ge`) may only be used on an `int`
+    field. Ordering two booleans has no meaning the engine could implement.
+  - **G4** — the guard's field and its register's field must be declared the same type.
+    Comparing an integer against a boolean passes G1–G3 individually and is still nonsense.
+  - **G5** — a declared register that no guard names is reported (see `registers`, above).
+
+  One requirement this design names has no check here, on purpose: that the value a guard
+  compares against is derivable from the trace and nowhere else. It is enforced by
+  construction, not by anything that could fail — a register's only source is a fold over a
+  field of messages of declared kinds, and there is no syntax anywhere in this schema for a
+  register to come from anything else.
+
+  **`op` is one of six words, never a symbol.** Loaded through the shipped
+  `MachineSafeLoader`, an unquoted `op: >` in block context parses to the empty string with
+  no error raised anywhere — `>` is YAML's block-scalar indicator, not a comparison operator
+  reaching the parser — and `op: !=` fails with a YAML error about a tag (`!`) instead of a
+  named field. Both are the wrong failure mode for a publisher who tried a symbol, so the
+  vocabulary is spelled out as words instead:
+
+  | `op` | Meaning | Atoms it accepts |
+  |---|---|---|
+  | `eq` | equal | `EQ` |
+  | `ne` | not equal | `LT`, `GT` |
+  | `lt` | less than | `LT` |
+  | `le` | less than or equal | `LT`, `EQ` |
+  | `gt` | greater than | `GT` |
+  | `ge` | greater than or equal | `EQ`, `GT` |
+
+  `LT`, `EQ` and `GT` are the three possible outcomes of comparing two values of a totally
+  ordered type — there are no others — and every operator above is exactly the union of the
+  outcomes that make it true. `eq` and `ne` are meaningful on a `bool` field (there are only
+  two values, so equal-or-not is all there is to ask); `lt`/`le`/`gt`/`ge` are not (G3).
+
+  **Two engine semantics this schema pins even though nothing in this cycle evaluates a
+  guard**, so that the engine which does is working from one fixed answer rather than
+  inventing it at that point:
+
+  1. A guard is evaluated against the register's value *before* the arriving message is
+     folded into it. Otherwise a guard comparing a field against the very register that
+     folds that same field over the same kind — `ballot > highest_promised`, folded by
+     `max` over `prepare` — could never fire: the register would already have absorbed the
+     value being compared.
+  2. A guard whose field is absent from the arriving message evaluates to false, so the
+     transition does not fire. Absence is never an error and never a crash; a run in which
+     no transition fires is simply a run the engine does not consider legal, for reasons it
+     records elsewhere.
+
+  **One requirement this schema states and no check enforces:** a machine declaring
+  anything shaped like a consensus protocol — Paxos's acceptor among them — must say so in
+  its own prose: that it checks message sequencing and the invariant its guards encode, and
+  that it does *not* check agreement among peers. Nothing here can verify that a publisher
+  wrote that sentence. It is a discipline this schema asks for and cannot compel.
+
+Any field on a transition entry other than `from`, `on`, `by`, `to`, `signal`, `effects` and
+`guard` is rejected by name.
