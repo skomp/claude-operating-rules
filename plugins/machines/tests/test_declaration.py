@@ -1,6 +1,7 @@
 import unittest
 from machines.declaration import extract_block, parse
 from machines.errors import DeclarationError
+from machines.machine import FIELDS, REQUIRED
 
 ONE = "intro\n\n```machine\nmachine: x\n```\n\ntrailing prose\n"
 NONE = "intro only, no block\n"
@@ -142,6 +143,18 @@ class TestParse(unittest.TestCase):
                 with self.assertRaises(DeclarationError) as ctx:
                     parse(VALID.replace("cap: 10", "cap: " + value))
                 self.assertEqual(ctx.exception.field, "cap")
+
+    def test_fields_is_accepted_but_not_required(self):
+        # `fields` (and `registers` alongside it) was added to FIELDS in
+        # Task 3. VALID carries neither, and has always parsed -- assert
+        # that on purpose, rather than let the suite stay green by
+        # accident if a future change made either required.
+        self.assertIn("fields", FIELDS)
+        self.assertNotIn("fields", REQUIRED)
+        self.assertIn("registers", FIELDS)
+        self.assertNotIn("registers", REQUIRED)
+        m = parse(VALID)
+        self.assertEqual(m.fields, {})
 
     def test_duplicate_state_name_raises(self):
         bad = VALID.replace(

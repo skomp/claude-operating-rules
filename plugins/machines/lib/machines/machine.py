@@ -1,3 +1,4 @@
+import re
 from collections import deque
 
 from .pattern import PatternError, compile_pattern
@@ -9,11 +10,48 @@ from .pattern import PatternError, compile_pattern
 # believes -- which is the failure this framework exists to answer, not one
 # it should cause. Absent means "this protocol declares no bound"; it does
 # not mean zero, and there is no default.
-FIELDS = ("machine", "version", "prefix", "roles", "kinds",
-          "cap", "initial", "states", "transitions")
-REQUIRED = tuple(f for f in FIELDS if f != "cap")
+#
+# `fields` and `registers` are optional the same way: a protocol with
+# nothing to guard on declares neither, and gets an empty mapping rather
+# than a required field it never wanted. `registers` is tolerated here
+# (accepted, parsed into nothing) so that a declaration carrying it does
+# not raise "unknown field" before Task 4 gives the key itself meaning.
+FIELDS = ("machine", "version", "prefix", "roles", "kinds", "fields",
+          "registers", "cap", "initial", "states", "transitions")
+REQUIRED = tuple(f for f in FIELDS if f not in ("cap", "fields", "registers"))
 
 _INFINITY = float("inf")
+
+# A declared header field's name. Reused unchanged for register names
+# (Task 4): both live in the same namespace a publisher writes into, and
+# both must stay out of the dotted `envelope.*` namespace a later cycle
+# reserves for the message envelope itself (the Lamport clock among it) --
+# forbidding `.` here is what keeps a declared field from ever colliding
+# with it.
+NAME = re.compile(r"^[a-z][a-z0-9_-]*$")
+
+# The closed set of types a declared field may carry. Closed on purpose:
+# an open type word (`integer`, `number`, ...) would let a publisher write
+# something the engine's guard comparison (cycle B) cannot evaluate, and
+# the failure would surface far from the declaration that caused it.
+# Deliberately no `string` -- a guard compares a register's fold to a
+# field by equality or order (cycle B), and every comparison this schema
+# can express is arithmetic or boolean; there is no string fold or string
+# ordering defined anywhere in the spec for one to compare against.
+FIELD_TYPES = ("int", "bool")
+
+
+class Field(object):
+    """A declared header field: a name and its type, nothing else.
+
+    `type` is one of `FIELD_TYPES`. There is no default and no value here
+    -- a `Field` describes what a header position must contain, not what
+    any one message carries in it.
+    """
+
+    def __init__(self, name, type):
+        self.name = name
+        self.type = type
 
 
 class State(object):
@@ -57,7 +95,7 @@ class Transition(object):
 
 class Machine(object):
     def __init__(self, name, version, prefix, roles, kinds, cap,
-                 initial, states, transitions):
+                 initial, states, transitions, fields=None):
         self.name = name
         self.version = version
         self.prefix = prefix
@@ -67,6 +105,11 @@ class Machine(object):
         self.initial = initial
         self.states = states
         self.transitions = transitions
+        # Dict[str, Field], keyed by field name. Defaults to `{}`, not
+        # `None`: a machine with no declared fields still has something
+        # iterable and indexable, the same reasoning `Transition.effects`
+        # already applies to `effects=None`.
+        self.fields = fields if fields is not None else {}
 
 
 # `prefix` is not just a string -- it is source text pattern.py compiles to
@@ -182,7 +225,7 @@ def prefix_problem(prefix):
         # Name the field. Every other `check_machine` message says which
         # field it is about; without the prefix here, a publisher reads
         # `unclosed group starting at position 0` and has to guess which
-        # of nine fields is a pattern at all.
+        # of eleven fields is a pattern at all.
         return "prefix pattern %r: %s" % (prefix, exc)
     except RecursionError:
         return "prefix pattern %r: too deeply nested to analyse" % (prefix,)

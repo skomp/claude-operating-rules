@@ -3,14 +3,16 @@
 A machine is a single ` ```machine ` fenced block inside a bundle's `SKILL.md`, next to the
 prose that explains it. `machines.declaration.parse(text)` turns that block into a `Machine`.
 It is a closed language — no expressions, no scripts, no callbacks — so every field below is
-one of the nine the parser accepts. **Any other top-level field is rejected by name**, not
+one of the eleven the parser accepts. **Any other top-level field is rejected by name**, not
 silently ignored: a publisher who writes `caps: 10` is told about `caps`, not handed a machine
-with a default cap they never asked for.
+with a default cap they never asked for. One of the eleven, `registers`, is accepted and
+parsed into nothing yet — Task 4 of this cycle gives it meaning, and this document does not
+cover it until then.
 
 Every field in this document is required unless its section says otherwise. A required
-field that is missing is rejected by name, the same as an unknown one. **`cap` is the one
-top-level field that is optional**, and its absence means something: this protocol declares
-no bound.
+field that is missing is rejected by name, the same as an unknown one. **`cap`, `fields`,
+and `registers` are the top-level fields that are optional**; each optional field's absence
+means something specific to it, stated in its own section below.
 
 **Every type in this document is enforced, and every failure names the field.** A field
 documented as a string must be a string; `roles` must be a mapping; each `states` and
@@ -164,6 +166,45 @@ that message and no state does anything with it, which is vocabulary that reads 
 supported and is not. **Must actually be a list** — `kinds: "yes"` is rejected by name rather than silently
 iterated character-by-character into `{'y', 'e', 's'}`, which is what `set("yes")` would
 otherwise do with no error at all.
+
+## `fields`
+
+**Type:** mapping of field name to type. **Optional.** Absent or empty means this machine
+declares no header fields, and `check_machine` has nothing to say about it either way —
+`fields` is entirely parse-time; there is no cross-reference to make.
+
+A field is a named, typed position in a message header: a value a peer's message carries
+that a later cycle's guard compares against, and that a register (a later cycle) can fold
+over a trace of. Task 3 only declares the shape; nothing here evaluates a guard, folds a
+trace, or reads a channel — that is cycle B's engine, not this parser.
+
+**There are exactly two types: `int` and `bool`.** Closed on purpose, so a publisher who
+writes `ballot: integer` or `ballot: number` is told the word is wrong by name, rather than
+getting a machine whose guard the engine cannot evaluate. **There is deliberately no
+`string`.** Every comparison a guard can express is arithmetic or an equality check on a
+whole number or a boolean; nothing in this schema defines a string fold or a string
+ordering for a guard to compare against, so a `string` field would be a type nothing could
+ever do anything with.
+
+**A field's name must match `^[a-z][a-z0-9_-]*$`** — lowercase letters, digits, `_` and `-`,
+starting with a letter. In particular, **a field name may never contain a `.`**: the dotted
+namespace (`envelope.clock` and the like) is reserved for the message envelope a later
+cycle adds. That is not a stylistic rule — a declared field that collided with the
+envelope's own name would be a readable route back to guarding the Lamport clock directly,
+which the spec forbids outright. A machine's own field named `clock`, with no dot, is a
+perfectly ordinary field and has nothing to do with the envelope's clock; the two coexist
+because the envelope's is always dotted and a declared field's is never allowed to be.
+
+**A mapping, not a list of `{name, type}` objects.** A list would be a third entry shape to
+validate for no gain over what a mapping already expresses, and — the reason that matters
+more — a mapping cannot carry a duplicate field name at all; there is nothing to catch
+because there is nowhere for it to occur.
+
+```yaml
+fields:
+  ballot: int
+  blocking: bool
+```
 
 ## `cap`
 

@@ -1,8 +1,8 @@
 import re
 import yaml
 from .errors import DeclarationError
-from .machine import (FIELDS, REQUIRED, Machine, State, Transition,
-                       _MAX_PREFIX_LENGTH)
+from .machine import (FIELDS, REQUIRED, Machine, State, Transition, Field,
+                       FIELD_TYPES, NAME, _MAX_PREFIX_LENGTH)
 
 _FENCE = re.compile(r"^```machine[ \t]*\n(.*?)^```[ \t]*$", re.MULTILINE | re.DOTALL)
 
@@ -96,6 +96,8 @@ def parse(text):
             "roles must be a mapping of role name to what it binds to",
             field="roles")
 
+    fields = _fields_section(data)
+
     raw_states = data["states"]
     if not isinstance(raw_states, list):
         raise DeclarationError("states must be a list", field="states")
@@ -137,7 +139,56 @@ def parse(text):
         data["machine"], data["version"], data["prefix"],
         dict(roles), set(kinds), cap,
         data["initial"], states, transitions,
+        fields=fields,
     )
+
+def _fields_section(data):
+    """The optional `fields` mapping: declared header field name to its
+    type. Entirely parse-time -- there is no cross-reference for
+    `check_machine` to make, because a field's type is fixed right here
+    and nothing later depends on another field's value.
+
+    Absent or empty means no fields declared, and the result is `{}`, not
+    `None` -- a caller (cycle B's engine, and Task 4's `registers`, which
+    will reference a field by name) never has to check for the
+    difference.
+
+    A mapping, not a list of `{name, type}` objects: a list would be a
+    third entry shape to validate for the same information a mapping
+    already carries, and a mapping cannot carry a duplicate name at all --
+    there is no `[{name: ballot, ...}, {name: ballot, ...}]` here to
+    catch.
+
+    Each key must match `NAME` (machine.py) -- in particular, no `.`: the
+    dotted namespace is reserved for the message envelope a later cycle
+    adds (`envelope.clock` and the like), and a declared field colliding
+    with it would be the readable route back to guarding that clock
+    directly, which the spec forbids. Each value must be a string found in
+    `FIELD_TYPES` -- closed, so a publisher who writes `ballot: integer`
+    or `ballot: number` is told the word is wrong instead of getting a
+    machine whose guard the engine cannot evaluate, and `fields: {ballot:
+    3}` is rejected here, before a non-string type word ever reaches a
+    guard's type check.
+    """
+    if "fields" not in data:
+        return {}
+    raw = data["fields"]
+    if not isinstance(raw, dict):
+        raise DeclarationError(
+            "fields must be a mapping of field name to type, not %r" % (raw,),
+            field="fields")
+    fields = {}
+    for name, type_word in raw.items():
+        if not isinstance(name, str) or not NAME.match(name):
+            raise DeclarationError(
+                "field name %r must match %s" % (name, NAME.pattern),
+                field="fields")
+        if not isinstance(type_word, str) or type_word not in FIELD_TYPES:
+            raise DeclarationError(
+                "field %r has type %r, which is not one of %s"
+                % (name, type_word, FIELD_TYPES), field="fields")
+        fields[name] = Field(name, type_word)
+    return fields
 
 def _reject_unknown(raw, allowed, where):
     for key in raw:

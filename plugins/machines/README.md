@@ -16,11 +16,13 @@ Anything that talks about a machine actually running is a later cycle.
 
 ## The declaration
 
-A machine is a single ` ```machine ` fenced YAML block inside a bundle's `SKILL.md` — nine
-fields: `machine`, `version`, `prefix`, `roles`, `kinds`, `cap`, `initial`, `states`,
-`transitions`. All of them are required except `cap`. Any other top-level field is rejected
-by name, not silently ignored. `SCHEMA.md` documents every field and why it exists,
-including the two hazards worth knowing before you write a declaration by hand.
+A machine is a single ` ```machine ` fenced YAML block inside a bundle's `SKILL.md` — eleven
+fields: `machine`, `version`, `prefix`, `roles`, `kinds`, `fields`, `registers`, `cap`,
+`initial`, `states`, `transitions`. All of them are required except `cap`, `fields`, and
+`registers`. Any other top-level field is rejected by name, not silently ignored.
+`SCHEMA.md` documents every field and why it exists, including the two hazards worth
+knowing before you write a declaration by hand. (`registers` is accepted and parsed into
+nothing yet — a later cycle gives it meaning.)
 
 **A protocol does not have to terminate, and does not have to declare a cap.** A state is
 *accepting* when nothing further is required — it is fine for the conversation to stop
