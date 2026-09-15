@@ -332,6 +332,25 @@ is the worse one. An unused-field check would force an author to choose between 
 nobody reads and a guard the spec forbids. (Contrast `kinds`, where the shipped unused-kind
 check is right, because a kind no transition fires on is genuinely unreachable vocabulary.)
 
+#### The asymmetry: an unread **register** is reported, an unused **field** is not
+
+Task 5's check G5 reports a register no guard names, and nothing here reports a field no guard
+tests. That is deliberate, and the argument belongs in the plan rather than in a report,
+because **an asymmetry a reader cannot account for will be "fixed" by a later session into
+whichever half is easier to argue for.**
+
+> **A field has a second legitimate consumer; a register does not.** A declared field that no
+> guard tests can still be carried in the header for the participant to read —
+> `session-relay`'s `blocking` is exactly that, and §10 says a guard over it is the *worse*
+> answer. A register exists only to be compared against. An unread one has no other use, so it
+> is dead weight and probably an error.
+
+So the two checks are not two answers to one question. They are one answer — *report a
+declaration that has no possible consumer* — applied to two things with different numbers of
+consumers. **If a later cycle gives registers a second consumer** (say, the verdict reporting
+every register's value for readability, not only the ones a guard touched), G5 stops being
+justified and must go. Whoever does that should delete it rather than weaken it.
+
 ### Choice 4 — a register is one scalar, folded from the trace, and this is where the Paxos line is drawn
 
 ```yaml
@@ -403,12 +422,11 @@ is not merely forbidden, it does not work.
 read. `initial` is required, so the register always has a value, and *"has a `prepare` arrived
 yet"* is a runtime fact. Nothing is reported.
 
-**What it does check:** a declared register that **no guard names is reported**. Unlike a
-field, a register has exactly one consumer in the whole framework — a guard — so an unread
-register is provably dead weight. (This is a judgement call and a reviewer may overturn it:
-the counter-argument is §9's rule against findings an author cannot suppress. It is reported
-here because, unlike a doomed branch, an unread register is never a true thing an author
-meant to declare.)
+**What it does check:** a declared register that **no guard names is reported** (Task 5, check
+G5). A register has exactly one consumer in the whole framework — a guard — so an unread
+register has no other use and is probably an error. **A field is different because it has a
+second legitimate consumer**: the participant reading the header. The full argument, and the
+condition under which G5 must be deleted rather than weakened, is under *Choice 3*.
 
 **Comparison against a literal constant is not expressible.** `ballot > 0` has no form:
 a guard's right-hand side is always a register, per the brief. A constant *could* be faked by
@@ -535,9 +553,19 @@ checked before building.
 3. The measurement above confirms it: under the accepting-only goal set, exactly one existing
    test changes, and it changes in the direction §9 asked for.
 
-**If the author disagrees, this is a one-line change** (the goal set becomes
-`accepting | terminals`) and Task 8's tests say which assertions move. Say so rather than
-splitting the difference.
+**Resolved by the author, 2026-09-15: the accepting-only goal set stands, and here is the
+resolution a later reader will need when they meet §9's wording.** The two goal sets are not
+a disagreement to settle but **two checks asking two different questions**, and §9's sentence
+is correct for one of them:
+
+| Check | Question | Goal set |
+|---|---|---|
+| can-reach-somewhere-to-stop (shipped, unchanged) | can you get out of limbo? | **accepting *or* terminal** — aborting *is* getting out |
+| cap satisfiability (Task 8) | can you reach somewhere *good* within the budget? | **accepting only** — an abort is not somewhere good |
+
+`accepting | terminal` was the right instruction for the reachability check and was carried
+across to the cap check by inheritance. **Keep both goal sets, and keep this table**, or the
+next reader comparing Task 8 against §9's sentence will "fix" one into the other.
 
 ### 2. §11.12 says the cap's scope is undecided; the brief decides it
 
@@ -1026,7 +1054,7 @@ git commit -m "Add registers: one remembered scalar, folded from the trace"
 | G2 | a guard's `register` names a declared register | a guard against a value nothing derives |
 | G3 | an ordering operator is used only on an `int` field | ordering two booleans, which has no meaning the engine could implement — §9's second guard check |
 | G4 | the guard's field type equals the guard's register's field type | comparing an integer against a boolean, which passes G1–G3 individually and is still nonsense |
-| G5 | a declared register that no guard names is reported | dead weight with exactly one possible consumer. See *Choice 4* — a judgement call, flagged |
+| G5 | a declared register that no guard names is reported | a register has exactly one possible consumer — a guard — so an unread one is dead weight. **A field is not reported, because it has a second consumer: the participant reading the header.** The argument, and the condition under which this check must be deleted, is under *Choice 3* |
 
 **§9's third guard check — "the remembered value is derivable from the trace, not from
 anywhere else" — needs no code, and say so in the comment.** It is enforced by construction:
@@ -1335,9 +1363,109 @@ Step 1.
 **The precision loss in phase 2's guard is deliberate and must be documented, not hidden.**
 Silence is the safe direction: §7 already establishes that the guard abstraction costs
 precision and not soundness, and §9 already refuses findings an author cannot suppress. A
-fatal *"could not analyse"* on a valid machine would be worse than a missing finding. Note
-also that phase 2 runs only for a machine needing more than `limit` signalling transitions in
-total, so a machine large enough to trip the guard is one whose cap is already implausible.
+fatal *"could not analyse"* on a valid machine would be worse than a missing finding.
+
+#### `_MAX_CAP_SEARCH` — the measurement that must sit beside the number
+
+**The precedent is specific, and it is the reason this subsection exists.** Cycle A shipped
+`_MAX_NFA_STATES = 10000` with a stated rationale — *"this allows a five-thousand-character
+literal"* — that was **wrong by a factor of ten**, because recursion bound first, at 498
+characters. The value was fine; **the unmeasured justification beside it was the defect**, and
+it took a whole-branch review to find. Do not repeat that here.
+
+**Measured, against the two declarations that will exist after Task 9:**
+
+| Machine | states × (limit + 1)^roles | Product | Budget ÷ product |
+|---|---|---|---|
+| `session-relay` | 5 × (10 + 1)² | **605** | 1,653× |
+| `paxos-acceptor` | 5 × (6 + 1)² | **245** | 4,082× |
+
+**That is about three orders of magnitude of headroom, not six.** State it as three. The more
+useful framing is the largest limit each shape can carry before the guard bites — compute
+these during the task and keep them in `SCHEMA.md`, because they are what an author actually
+needs to know:
+
+| Shape | Fully analysed up to `limit` |
+|---|---|
+| 5 states, 2 roles | **446** |
+| 5 states, 3 roles | **57** |
+| 5 states, 4 roles | **20** |
+| 20 states, 2 roles | **222** |
+| 20 states, 4 roles | **13** |
+
+**Read the 4-role row rather than the flattering 2-role one.** A four-role protocol with a cap
+of 30 trips the guard. That is not comfortable, and it is exactly the kind of thing the
+`_MAX_NFA_STATES` precedent says to notice before shipping rather than after. **The defence is
+real but it is a second fact, not the first one:** phase 2 is reached only by a subject phase 1
+could not clear, i.e. one needing **more than `limit` signalling transitions in total** to
+reach an accepting state. A 4-role machine with `limit: 30` that also needs more than thirty
+signalling transitions from some state is already a strange declaration. **Both facts belong
+in the plan and in `SCHEMA.md`; quoting only the second one is how the next unmeasured
+rationale gets written.**
+
+**If the implementer finds a shape that is both plausible and past the guard, that is a
+finding to report** — the answer is then to raise the constant or to change the algorithm, not
+to widen the claim.
+
+**Three tests, and the second and third are the amendment's point.** A silent path nobody
+exercises is a path nobody has shown is silent — `evidence-discipline`, and the reason cycle
+A's non-mutation invariant needed a forced fix round.
+
+```python
+def test_a_real_machine_is_far_inside_the_search_budget(self):
+    # Pins the headroom claim so that lowering the constant fails loudly
+    # rather than silently switching real machines to the silent path.
+    self.assertLess(5 * (10 + 1) ** 2, _MAX_CAP_SEARCH)      # session-relay
+    self.assertLess(5 * (6 + 1) ** 2, _MAX_CAP_SEARCH)       # paxos-acceptor
+
+def test_a_machine_past_the_search_budget_reports_nothing_and_returns(self):
+    # The guard's silent path, actually exercised. Patch the constant DOWN
+    # rather than building a machine with thirteen roles: the suite runs in
+    # 0.4s and must keep doing so. `test_registry.py` already establishes
+    # this pattern -- it patches `pattern_module._MAX_GROUP_DEPTH` and
+    # restores it in a `finally`. Copy that, including the `finally`.
+    m = <a per-role machine with a subject phase 1 cannot clear>
+    original = machine_module._MAX_CAP_SEARCH
+    try:
+        machine_module._MAX_CAP_SEARCH = 1          # below any real product
+        problems = check_machine(m)                 # must return, not hang
+    finally:
+        machine_module._MAX_CAP_SEARCH = original
+    self.assertEqual([p for p in problems if "cap" in p], [], problems)
+
+def test_the_same_machine_is_reported_when_the_budget_allows_the_search(self):
+    # Without this, the test above passes for a machine that was simply
+    # satisfiable, and proves nothing about the guard. THIS is what makes
+    # the silence above attributable to the budget.
+    self.assertTrue(any("cap" in p for p in check_machine(m)))
+```
+
+**The third test is not optional.** On its own the second one cannot distinguish *"the guard
+suppressed a real finding"* from *"there was no finding"*, and a test that cannot fail for the
+reason it was written is the shape of defect this project keeps paying for.
+
+**The machine for those two tests, measured — and the obvious shape is the wrong one.** It
+must satisfy *both* conditions at once: phase 1 cannot clear it (total signalling distance
+> `limit`) **and** phase 2 genuinely reports it (per-role maximum > `limit`). An alternating
+chain satisfies only the first, so the third test would fail on it:
+
+| Chain (one signalling edge per entry, by that role) | `limit` | total | per-role max | phase 1 clears? | phase 2 reports? |
+|---|---|---|---|---|---|
+| `A, B, A, B, A` | 4 | 5 | 3 | no | **no** — satisfiable |
+| `A, B` | 1 | 2 | 1 | no | **no** — satisfiable |
+| **`A, A, B`** | **1** | **3** | **2** | **no** | **yes** |
+| `A, A` | 1 | 2 | 2 | no | yes |
+| `A, A, A, B, B` | 2 | 5 | 3 | no | yes |
+
+**Use `A, A, B` at `limit: 1`** — four states, two roles, product `4 × 2² = 16`, so patching
+`_MAX_CAP_SEARCH` down to `1` trips the guard and patching it back reports the subject. Two
+roles rather than one, so the per-role search is doing real work rather than degenerating into
+the per-channel case.
+
+**The rule this row of the table encodes**: one role must send more than `limit` of the
+transitions by itself. Spreading them evenly across roles is precisely what makes a per-role
+cap *satisfiable*, which is the whole point of the scope — so the intuitive "make it long"
+machine tests nothing.
 
 **Message text — keep the shipped vocabulary, because three existing assertions depend on it.**
 Proposed, for `per: channel`:
@@ -1399,6 +1527,10 @@ def test_a_per_role_cap_is_satisfied_where_a_per_channel_cap_of_the_same_size_is
 def test_the_cap_check_is_still_skipped_entirely_when_cap_is_absent(self)
 ```
 
+**and the three `_MAX_CAP_SEARCH` tests from the subsection above, which are not optional:**
+the headroom assertion, the tripped guard, and the same machine reported when the budget
+allows the search. The third is what makes the second's silence attributable to the guard.
+
 The per-role test is the one that proves the scope is real. Build it from `VALID` with
 `cap: { limit: 1, per: role }` and assert **zero** cap problems, against the same machine
 with `cap: 1` asserting **one**.
@@ -1414,7 +1546,10 @@ other thing and the next reader will notice.
 - [ ] **Step 5: Document** — rewrite `SCHEMA.md`'s cap-satisfiability paragraphs. **Delete the
 "One consequence, stated rather than left to be discovered" paragraph**: it documents the
 vacuity this task removes, and leaving it would be a documented lie. Replace it with what the
-check now measures, per scope, and with the phase-2 size limit and its stated silence.
+check now measures, per scope, and with the phase-2 size limit and its stated silence —
+**including the largest-limit-per-shape table, with the 3- and 4-role rows and not only the
+flattering 2-role one.** An author whose machine goes quietly unanalysed must be able to find
+out why by reading `SCHEMA.md`, which is the entire lesson of `_MAX_NFA_STATES`.
 
 - [ ] **Step 6: Commit**
 
@@ -1540,7 +1675,8 @@ The six edits:
 | §4's layer table, Protocol row | *"the typed header fields a transition may test — not built"* → built |
 | §7's "Typed header fields" | drop **Not built**; record the concrete syntax that shipped — the two types, the two folds, the structured guard, and the refusals (`string`, `count`, `argmax`, a literal right-hand side) |
 | §9's "The guard checks" | drop **Not built**; record that the third check (*derivable from the trace*) needs no code because the syntax admits no other source; record that the determinism check was **strengthened** and that no guard-free machine's verdict changed |
-| §9's "The cap check is weak" | drop **Shipped, and known to be too weak**; record the stronger form, **and record that the goal set stayed at the accepting states, with §7's reason** — §9's own wording says *accepting or terminal* and the next reader must not read that as a regression |
+| §9's "The cap check is weak" | drop **Shipped, and known to be too weak**; record the stronger form. **Correct §9's own sentence**, which says the goal is *"an accepting or a terminal state"*: that is right for the reachability check and wrong for the cap check, and the two-checks-two-goal-sets table from *"Where this plan contradicts its inputs"* item 1 is what belongs there. Leaving the sentence as it stands is how a later session "fixes" Task 8 into a regression |
+| §9's "The guard checks" *(second edit)* | record `_MAX_CAP_SEARCH`'s silent path as a **stated limit of the checker**, next to the two precision losses §9 already admits. A machine whose per-role cap went unanalysed is a third thing the checker does not tell you, and §9 is where that list lives |
 | §11.7 | resolved — prefix validation is in `check_machine` |
 | §11.12, and §6's `remaining` line, and §10's item 1 | **the cap-scope contradiction is settled.** §11.12 says *"the author is the one who knows"*; the author chose the second option. §6's `remaining` promise is now expressible; §10's item 1 moves from *open* to *settled in A.1*. Leaving these three saying the decision is open is how cycle B reopens it |
 | §13's A.1 proposal | mark it as a decision taken and a cycle delivered, and re-state what B inherits |
